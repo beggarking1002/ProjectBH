@@ -15,6 +15,7 @@ public class ProjectBH : ModuleRules
 			"InputCore",
 			"EnhancedInput",
 			"UMG",
+			"GameplayTags",
 			"Slate"
 		});
 
