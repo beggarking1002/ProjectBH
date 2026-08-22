@@ -35,6 +35,11 @@ ABHHeroCharacter::ABHHeroCharacter()
 	FollowCamera->bUsePawnControlRotation = false;
 }
 
+void ABHHeroCharacter::PossessedBy(AController* NewController)
+{
+	Super::PossessedBy(NewController);
+}
+
 void ABHHeroCharacter::SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent)
 {
 	checkf(InputConfigDataAsset,TEXT("Forgot to assign a valid data asset as input config"));

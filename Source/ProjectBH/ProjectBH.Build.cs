@@ -14,6 +14,8 @@ public class ProjectBH : ModuleRules
 			"Engine",
 			"InputCore",
 			"EnhancedInput",
+			"GameplayAbilities",
+			"GameplayTasks",
 			"UMG",
 			"GameplayTags",
 			"Slate"

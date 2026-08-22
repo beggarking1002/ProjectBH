@@ -23,6 +23,10 @@ public:
 	UCameraComponent* GetFollowCamera() const { return FollowCamera; }
 
 protected:
+	//~ Begin APawn Interface.
+	virtual void PossessedBy(AController* NewController) override;
+	//~ End APawn Interface
+	
 	virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;
 	
 	/** Positions the camera behind the character and handles collision with level geometry. */

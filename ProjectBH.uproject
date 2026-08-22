@@ -11,8 +11,16 @@
 			"AdditionalDependencies": [
 				"Engine",
 				"AIModule",
+				"EnhancedInput",
+				"GameplayAbilities",
 				"UMG"
 			]
+		}
+	],
+	"Plugins": [
+		{
+			"Name": "GameplayAbilities",
+			"Enabled": true
 		}
 	]
 }
