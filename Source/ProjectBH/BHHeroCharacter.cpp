@@ -3,8 +3,11 @@
 #include "BHHeroCharacter.h"
 
 #include "BHGameplayTags.h"
+#include "AbilitySystem/BHAbilitySystemComponent.h"
 #include "ProjectBH.h"
 #include "Weapons/BHWeapon.h"
+#include "AbilitySystemInterface.h"
+#include "Animation/AnimMontage.h"
 #include "EnhancedInputSubsystems.h"
 #include "Camera/CameraComponent.h"
 #include "Components/CapsuleComponent.h"
@@ -12,6 +15,7 @@
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/SpringArmComponent.h"
 #include "Components/Input/BHInputComponent.h"
+#include "GameplayEffect.h"
 #include "Net/UnrealNetwork.h"
 
 namespace BHHeroWeaponSockets
@@ -101,6 +105,7 @@ void ABHHeroCharacter::SetupPlayerInputComponent(class UInputComponent* PlayerIn
 
 	WarriorInputComponent->BindNativeInputAction(InputConfigDataAsset,BHGameplayTags::InputTag_Move,ETriggerEvent::Triggered,this,&ThisClass::Input_Move);
 	WarriorInputComponent->BindNativeInputAction(InputConfigDataAsset,BHGameplayTags::InputTag_Look,ETriggerEvent::Triggered,this,&ThisClass::Input_Look);
+	WarriorInputComponent->BindNativeInputAction(InputConfigDataAsset, BHGameplayTags::InputTag_BasicAttack, ETriggerEvent::Started, this, &ThisClass::Input_BasicAttack);
 }
 
 void ABHHeroCharacter::Input_Move(const FInputActionValue& InputActionValue)
@@ -136,5 +141,94 @@ void ABHHeroCharacter::Input_Look(const FInputActionValue& InputActionValue)
 	if (LookAxisVector.Y != 0.f)
 	{
 		AddControllerPitchInput(LookAxisVector.Y);
+	}
+}
+
+void ABHHeroCharacter::Input_BasicAttack()
+{
+	if (HasAuthority())
+	{
+		TryStartBasicAttack();
+		return;
+	}
+
+	ServerRequestBasicAttack();
+}
+
+void ABHHeroCharacter::ServerRequestBasicAttack_Implementation()
+{
+	TryStartBasicAttack();
+}
+
+void ABHHeroCharacter::TryStartBasicAttack()
+{
+	if (!BasicAttackMontage || !GetWorld() || GetWorld()->GetTimeSeconds() < NextBasicAttackTime)
+	{
+		return;
+	}
+
+	NextBasicAttackTime = GetWorld()->GetTimeSeconds() + BasicAttackCooldown;
+	MulticastPlayBasicAttack();
+}
+
+void ABHHeroCharacter::MulticastPlayBasicAttack_Implementation()
+{
+	if (BasicAttackMontage)
+	{
+		PlayAnimMontage(BasicAttackMontage);
+	}
+}
+
+void ABHHeroCharacter::PerformBasicAttackHit()
+{
+	if (!HasAuthority() || !BasicAttackDamageEffect)
+	{
+		return;
+	}
+
+	UBHAbilitySystemComponent* SourceAbilitySystem = GetBHAbilitySystemComponent();
+	if (!SourceAbilitySystem || !GetWorld())
+	{
+		return;
+	}
+
+	const FVector TraceStart = GetActorLocation() + FVector(0.0f, 0.0f, 50.0f);
+	const FVector TraceEnd = TraceStart + GetActorForwardVector() * BasicAttackRange;
+
+	FCollisionQueryParams QueryParameters(SCENE_QUERY_STAT(BHBasicAttack), false, this);
+	QueryParameters.AddIgnoredActor(this);
+	if (EquippedWeapon)
+	{
+		QueryParameters.AddIgnoredActor(EquippedWeapon);
+	}
+
+	TArray<FHitResult> HitResults;
+	const FCollisionShape TraceShape = FCollisionShape::MakeSphere(BasicAttackRadius);
+	GetWorld()->SweepMultiByChannel(HitResults, TraceStart, TraceEnd, FQuat::Identity, ECC_Pawn, TraceShape, QueryParameters);
+
+	TSet<AActor*> DamagedActors;
+	for (const FHitResult& HitResult : HitResults)
+	{
+		AActor* HitActor = HitResult.GetActor();
+		if (!HitActor || DamagedActors.Contains(HitActor))
+		{
+			continue;
+		}
+
+		IAbilitySystemInterface* TargetAbilitySystemInterface = Cast<IAbilitySystemInterface>(HitActor);
+		UAbilitySystemComponent* TargetAbilitySystem = TargetAbilitySystemInterface ? TargetAbilitySystemInterface->GetAbilitySystemComponent() : nullptr;
+		if (!TargetAbilitySystem || TargetAbilitySystem == SourceAbilitySystem)
+		{
+			continue;
+		}
+
+		FGameplayEffectContextHandle EffectContext = SourceAbilitySystem->MakeEffectContext();
+		EffectContext.AddSourceObject(this);
+		const FGameplayEffectSpecHandle EffectSpec = SourceAbilitySystem->MakeOutgoingSpec(BasicAttackDamageEffect, 1.0f, EffectContext);
+		if (EffectSpec.IsValid())
+		{
+			SourceAbilitySystem->ApplyGameplayEffectSpecToTarget(*EffectSpec.Data.Get(), TargetAbilitySystem);
+			DamagedActors.Add(HitActor);
+		}
 	}
 }

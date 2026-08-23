@@ -48,3 +48,6 @@ ProjectBH/.obsidian/workspace.json
 ProjectBH/.obsidian/workspace-mobile.json
 ProjectBH/.obsidian/workspaces.json
 ProjectBH/.trash/
+
+# Large generated lighting data from the imported Weapon Pack sample map
+/Content/Assets/Weapon_Pack/Map/Weapons_Kit_BuiltData.uasset
