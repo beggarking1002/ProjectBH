@@ -9,6 +9,7 @@
 class UCameraComponent;
 class USpringArmComponent;
 class UDataAsset_InputConfig;
+class ABHWeapon;
 struct FInputActionValue;
 
 /** Player-controlled character foundation for the first combat slice. */
@@ -26,6 +27,8 @@ protected:
 	//~ Begin APawn Interface.
 	virtual void PossessedBy(AController* NewController) override;
 	//~ End APawn Interface
+
+	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 	
 	virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;
 	
@@ -40,6 +43,16 @@ protected:
 #pragma region Inputs
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "CharacterData", meta = (AllowPrivateAccess = "true"))
 	UDataAsset_InputConfig* InputConfigDataAsset;
+
+	/** Weapon class equipped by this hero when the server possesses it. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Equipment", meta = (AllowPrivateAccess = "true"))
+	TSubclassOf<ABHWeapon> StartingWeaponClass;
+
+	/** Current server-authoritative equipped weapon. */
+	UPROPERTY(Replicated, VisibleInstanceOnly, BlueprintReadOnly, Category = "Equipment", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<ABHWeapon> EquippedWeapon;
+
+	void SpawnStartingWeapon();
 
 	void Input_Move(const FInputActionValue& InputActionValue);
 	void Input_Look(const FInputActionValue& InputActionValue);

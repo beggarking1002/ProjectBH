@@ -3,12 +3,21 @@
 #include "BHHeroCharacter.h"
 
 #include "BHGameplayTags.h"
+#include "ProjectBH.h"
+#include "Weapons/BHWeapon.h"
 #include "EnhancedInputSubsystems.h"
 #include "Camera/CameraComponent.h"
 #include "Components/CapsuleComponent.h"
+#include "Components/SkeletalMeshComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/SpringArmComponent.h"
 #include "Components/Input/BHInputComponent.h"
+#include "Net/UnrealNetwork.h"
+
+namespace BHHeroWeaponSockets
+{
+	const FName RightHand(TEXT("Weapon_R"));
+}
 
 ABHHeroCharacter::ABHHeroCharacter()
 {
@@ -38,6 +47,42 @@ ABHHeroCharacter::ABHHeroCharacter()
 void ABHHeroCharacter::PossessedBy(AController* NewController)
 {
 	Super::PossessedBy(NewController);
+	SpawnStartingWeapon();
+}
+
+void ABHHeroCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
+{
+	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+
+	DOREPLIFETIME(ABHHeroCharacter, EquippedWeapon);
+}
+
+void ABHHeroCharacter::SpawnStartingWeapon()
+{
+	if (!HasAuthority() || !StartingWeaponClass || EquippedWeapon)
+	{
+		return;
+	}
+
+	if (!GetMesh()->DoesSocketExist(BHHeroWeaponSockets::RightHand))
+	{
+		UE_LOG(LogProjectBH, Error, TEXT("%s requires a '%s' socket on its skeletal mesh before equipping a weapon."), *GetName(), *BHHeroWeaponSockets::RightHand.ToString());
+		return;
+	}
+
+	FActorSpawnParameters SpawnParameters;
+	SpawnParameters.Owner = this;
+	SpawnParameters.Instigator = this;
+	SpawnParameters.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+
+	EquippedWeapon = GetWorld()->SpawnActor<ABHWeapon>(StartingWeaponClass, FTransform::Identity, SpawnParameters);
+	if (!EquippedWeapon)
+	{
+		UE_LOG(LogProjectBH, Error, TEXT("%s failed to spawn its starting weapon."), *GetName());
+		return;
+	}
+
+	EquippedWeapon->AttachToComponent(GetMesh(), FAttachmentTransformRules::SnapToTargetNotIncludingScale, BHHeroWeaponSockets::RightHand);
 }
 
 void ABHHeroCharacter::SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent)
