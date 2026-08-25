@@ -5,7 +5,6 @@
 #include "BHGameplayTags.h"
 #include "AbilitySystem/BHAbilitySystemComponent.h"
 #include "ProjectBH.h"
-#include "Weapons/BHWeapon.h"
 #include "AbilitySystemInterface.h"
 #include "Animation/AnimMontage.h"
 #include "EnhancedInputSubsystems.h"
@@ -16,12 +15,6 @@
 #include "GameFramework/SpringArmComponent.h"
 #include "Components/Input/BHInputComponent.h"
 #include "GameplayEffect.h"
-#include "Net/UnrealNetwork.h"
-
-namespace BHHeroWeaponSockets
-{
-	const FName RightHand(TEXT("Weapon_R"));
-}
 
 ABHHeroCharacter::ABHHeroCharacter()
 {
@@ -32,7 +25,9 @@ ABHHeroCharacter::ABHHeroCharacter()
 	bUseControllerRotationYaw = false;
 	bUseControllerRotationRoll = false;
 
-	GetCharacterMovement()->bOrientRotationToMovement = true;
+	// Keep the character facing the controller direction so the locomotion Blend Space can play strafe animations.
+	GetCharacterMovement()->bOrientRotationToMovement = false;
+	GetCharacterMovement()->bUseControllerDesiredRotation = true;
 	GetCharacterMovement()->RotationRate = FRotator(0.0f, 500.0f, 0.0f);
 	GetCharacterMovement()->MaxWalkSpeed = 400.0f;
 	GetCharacterMovement()->BrakingDecelerationWalking = 2000.0f;
@@ -46,47 +41,8 @@ ABHHeroCharacter::ABHHeroCharacter()
 	FollowCamera = CreateDefaultSubobject<UCameraComponent>(TEXT("FollowCamera"));
 	FollowCamera->SetupAttachment(CameraBoom, USpringArmComponent::SocketName);
 	FollowCamera->bUsePawnControlRotation = false;
-}
 
-void ABHHeroCharacter::PossessedBy(AController* NewController)
-{
-	Super::PossessedBy(NewController);
-	SpawnStartingWeapon();
-}
-
-void ABHHeroCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
-{
-	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
-
-	DOREPLIFETIME(ABHHeroCharacter, EquippedWeapon);
-}
-
-void ABHHeroCharacter::SpawnStartingWeapon()
-{
-	if (!HasAuthority() || !StartingWeaponClass || EquippedWeapon)
-	{
-		return;
-	}
-
-	if (!GetMesh()->DoesSocketExist(BHHeroWeaponSockets::RightHand))
-	{
-		UE_LOG(LogProjectBH, Error, TEXT("%s requires a '%s' socket on its skeletal mesh before equipping a weapon."), *GetName(), *BHHeroWeaponSockets::RightHand.ToString());
-		return;
-	}
-
-	FActorSpawnParameters SpawnParameters;
-	SpawnParameters.Owner = this;
-	SpawnParameters.Instigator = this;
-	SpawnParameters.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-
-	EquippedWeapon = GetWorld()->SpawnActor<ABHWeapon>(StartingWeaponClass, FTransform::Identity, SpawnParameters);
-	if (!EquippedWeapon)
-	{
-		UE_LOG(LogProjectBH, Error, TEXT("%s failed to spawn its starting weapon."), *GetName());
-		return;
-	}
-
-	EquippedWeapon->AttachToComponent(GetMesh(), FAttachmentTransformRules::SnapToTargetNotIncludingScale, BHHeroWeaponSockets::RightHand);
+	ComboAttackSectionNames = { TEXT("Attack_A"), TEXT("Attack_B"), TEXT("Attack_C") };
 }
 
 void ABHHeroCharacter::SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent)
@@ -162,53 +118,177 @@ void ABHHeroCharacter::ServerRequestBasicAttack_Implementation()
 
 void ABHHeroCharacter::TryStartBasicAttack()
 {
-	if (!BasicAttackMontage || !GetWorld() || GetWorld()->GetTimeSeconds() < NextBasicAttackTime)
+	if (!HasAuthority() || !BasicAttackMontage || ComboAttackSectionNames.IsEmpty())
 	{
 		return;
 	}
 
-	NextBasicAttackTime = GetWorld()->GetTimeSeconds() + BasicAttackCooldown;
-	MulticastPlayBasicAttack();
+	if (bComboActive)
+	{
+		if (CurrentComboAttackIndex + 1 < ComboAttackSectionNames.Num())
+		{
+			bComboInputBuffered = true;
+		}
+		return;
+	}
+
+	bComboActive = true;
+	bComboInputBuffered = false;
+	CurrentComboAttackIndex = 0;
+	MulticastPlayBasicAttackSection(ComboAttackSectionNames[CurrentComboAttackIndex]);
 }
 
-void ABHHeroCharacter::MulticastPlayBasicAttack_Implementation()
+void ABHHeroCharacter::MulticastPlayBasicAttackSection_Implementation(FName SectionName)
 {
-	if (BasicAttackMontage)
+	if (BasicAttackMontage && !SectionName.IsNone())
 	{
-		PlayAnimMontage(BasicAttackMontage);
+		PlayAnimMontage(BasicAttackMontage, 1.0f, SectionName);
 	}
 }
 
 void ABHHeroCharacter::PerformBasicAttackHit()
 {
-	if (!HasAuthority() || !BasicAttackDamageEffect)
+	BeginMeleeHitWindow();
+	UpdateMeleeHitWindow();
+	EndMeleeHitWindow();
+}
+
+void ABHHeroCharacter::BeginMeleeHitWindow()
+{
+	if (!HasAuthority() || !GetMesh())
 	{
 		return;
 	}
 
-	UBHAbilitySystemComponent* SourceAbilitySystem = GetBHAbilitySystemComponent();
-	if (!SourceAbilitySystem || !GetWorld())
+	if (!IsValidSwordTracePoint(SwordTraceBaseName) || !IsValidSwordTracePoint(SwordTraceTipName))
+	{
+		UE_LOG(LogProjectBH, Error, TEXT("%s requires valid sword trace points '%s' and '%s' on its skeletal mesh."), *GetName(), *SwordTraceBaseName.ToString(), *SwordTraceTipName.ToString());
+		return;
+	}
+
+	PreviousSwordTraceBase = GetMesh()->GetSocketLocation(SwordTraceBaseName);
+	PreviousSwordTraceTip = GetMesh()->GetSocketLocation(SwordTraceTipName);
+	PreviousSwordTraceMid = IsValidSwordTracePoint(SwordTraceMidName)
+		? GetMesh()->GetSocketLocation(SwordTraceMidName)
+		: FMath::Lerp(PreviousSwordTraceBase, PreviousSwordTraceTip, 0.5f);
+	DamagedActors.Reset();
+	bMeleeHitWindowActive = true;
+}
+
+void ABHHeroCharacter::UpdateMeleeHitWindow()
+{
+	if (!HasAuthority() || !bMeleeHitWindowActive || !GetMesh() || !GetWorld() || !BasicAttackDamageEffect)
 	{
 		return;
 	}
 
-	const FVector TraceStart = GetActorLocation() + FVector(0.0f, 0.0f, 50.0f);
-	const FVector TraceEnd = TraceStart + GetActorForwardVector() * BasicAttackRange;
-
-	FCollisionQueryParams QueryParameters(SCENE_QUERY_STAT(BHBasicAttack), false, this);
-	QueryParameters.AddIgnoredActor(this);
-	if (EquippedWeapon)
-	{
-		QueryParameters.AddIgnoredActor(EquippedWeapon);
-	}
-
+	const FVector CurrentSwordTraceBase = GetMesh()->GetSocketLocation(SwordTraceBaseName);
+	const FVector CurrentSwordTraceTip = GetMesh()->GetSocketLocation(SwordTraceTipName);
+	const FVector CurrentSwordTraceMid = IsValidSwordTracePoint(SwordTraceMidName)
+		? GetMesh()->GetSocketLocation(SwordTraceMidName)
+		: FMath::Lerp(CurrentSwordTraceBase, CurrentSwordTraceTip, 0.5f);
 	TArray<FHitResult> HitResults;
-	const FCollisionShape TraceShape = FCollisionShape::MakeSphere(BasicAttackRadius);
-	GetWorld()->SweepMultiByChannel(HitResults, TraceStart, TraceEnd, FQuat::Identity, ECC_Pawn, TraceShape, QueryParameters);
+	bool bBlockedByWorld = false;
+	TraceSwordPoint(PreviousSwordTraceBase, CurrentSwordTraceBase, HitResults, bBlockedByWorld);
+	if (!bBlockedByWorld)
+	{
+		TraceSwordPoint(PreviousSwordTraceMid, CurrentSwordTraceMid, HitResults, bBlockedByWorld);
+	}
+	if (!bBlockedByWorld)
+	{
+		TraceSwordPoint(PreviousSwordTraceTip, CurrentSwordTraceTip, HitResults, bBlockedByWorld);
+	}
 
-	TSet<AActor*> DamagedActors;
+	ApplyBasicAttackDamage(HitResults);
+	PreviousSwordTraceBase = CurrentSwordTraceBase;
+	PreviousSwordTraceMid = CurrentSwordTraceMid;
+	PreviousSwordTraceTip = CurrentSwordTraceTip;
+}
+
+void ABHHeroCharacter::EndMeleeHitWindow()
+{
+	bMeleeHitWindowActive = false;
+	DamagedActors.Reset();
+}
+
+void ABHHeroCharacter::ResolveComboBranch()
+{
+	if (!HasAuthority() || !bComboActive)
+	{
+		return;
+	}
+
+	if (bComboInputBuffered && CurrentComboAttackIndex + 1 < ComboAttackSectionNames.Num())
+	{
+		bComboInputBuffered = false;
+		++CurrentComboAttackIndex;
+		MulticastPlayBasicAttackSection(ComboAttackSectionNames[CurrentComboAttackIndex]);
+		return;
+	}
+
+	EndBasicAttackCombo();
+}
+
+void ABHHeroCharacter::EndBasicAttackCombo()
+{
+	bComboActive = false;
+	bComboInputBuffered = false;
+	CurrentComboAttackIndex = INDEX_NONE;
+}
+
+bool ABHHeroCharacter::IsValidSwordTracePoint(const FName& PointName) const
+{
+	return GetMesh() && (GetMesh()->DoesSocketExist(PointName) || GetMesh()->GetBoneIndex(PointName) != INDEX_NONE);
+}
+
+void ABHHeroCharacter::TraceSwordPoint(const FVector& TraceStart, const FVector& TraceEnd, TArray<FHitResult>& HitResults, bool& bBlockedByWorld) const
+{
+	if (!GetWorld() || bBlockedByWorld)
+	{
+		return;
+	}
+
+	FCollisionQueryParams QueryParameters(SCENE_QUERY_STAT(BHSwordTrace), false, this);
+	QueryParameters.AddIgnoredActor(this);
+	const FCollisionShape TraceShape = FCollisionShape::MakeSphere(SwordTraceRadius);
+	FCollisionObjectQueryParams WorldObjectQueryParams;
+	WorldObjectQueryParams.AddObjectTypesToQuery(ECC_WorldStatic);
+	WorldObjectQueryParams.AddObjectTypesToQuery(ECC_WorldDynamic);
+
+	FHitResult WorldHit;
+	const bool bHitWorld = bStopSwordTraceOnWorld && GetWorld()->SweepSingleByObjectType(WorldHit, TraceStart, TraceEnd, FQuat::Identity, WorldObjectQueryParams, TraceShape, QueryParameters);
+
+	FCollisionObjectQueryParams PawnObjectQueryParams;
+	PawnObjectQueryParams.AddObjectTypesToQuery(ECC_Pawn);
+	TArray<FHitResult> PawnHits;
+	GetWorld()->SweepMultiByObjectType(PawnHits, TraceStart, TraceEnd, FQuat::Identity, PawnObjectQueryParams, TraceShape, QueryParameters);
+
+	for (const FHitResult& PawnHit : PawnHits)
+	{
+		if (!bHitWorld || PawnHit.Distance <= WorldHit.Distance)
+		{
+			HitResults.Add(PawnHit);
+		}
+	}
+
+	bBlockedByWorld = bHitWorld;
+}
+
+void ABHHeroCharacter::ApplyBasicAttackDamage(const TArray<FHitResult>& HitResults)
+{
+	UBHAbilitySystemComponent* SourceAbilitySystem = GetBHAbilitySystemComponent();
+	if (!SourceAbilitySystem)
+	{
+		return;
+	}
+
 	for (const FHitResult& HitResult : HitResults)
 	{
+		if (MaxSwordHitActors > 0 && DamagedActors.Num() >= MaxSwordHitActors)
+		{
+			return;
+		}
+
 		AActor* HitActor = HitResult.GetActor();
 		if (!HitActor || DamagedActors.Contains(HitActor))
 		{
