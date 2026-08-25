@@ -68,11 +68,11 @@ Event Graph에 GroundSpeed/Direction을 직접 계산하거나 별도 변수를 
 | 섹션 | 다음 섹션 | Notify |
 | --- | --- | --- |
 | `Attack_A` | `Recovery_A` | 실제 검 접촉 구간에 `ANS Melee Hit Window` |
-| `Recovery_A` | 없음 | 종료 직전 1~2프레임에 `AN Combo Branch` |
+| `Recovery_A` | 없음 | `ANS Melee Hit Window` 직후, Recovery 초반에 `AN Combo Branch` |
 | `Attack_B` | `Recovery_B` | 실제 검 접촉 구간에 `ANS Melee Hit Window` |
-| `Recovery_B` | 없음 | 종료 직전 1~2프레임에 `AN Combo Branch` |
+| `Recovery_B` | 없음 | `ANS Melee Hit Window` 직후, Recovery 초반에 `AN Combo Branch` |
 | `Attack_C` | `Recovery_C` | 실제 검 접촉 구간에 `ANS Melee Hit Window` |
-| `Recovery_C` | 없음 | 종료 직전 1~2프레임에 `AN Combo Branch` |
+| `Recovery_C` | 없음 | Recovery 초반에 `AN Combo Branch` (항상 종료) |
 
 Recovery가 다음 Attack으로 자동 연결되면 안 된다. `AN Combo Branch`가 서버 입력 버퍼를 보고 다음 Attack을 시작한다.
 
@@ -94,6 +94,16 @@ Recovery가 다음 Attack으로 자동 연결되면 안 된다. `AN Combo Branch
 입력은 타격마다 하나만 예약하는 버퍼다. `Attack_A` 또는 `Recovery_A` 재생 중에 좌클릭을 한 번 이상 하면 `Attack_B`가 예약되고, `Recovery_A` 끝의 `AN Combo Branch`에서 B가 시작된다. 같은 방식으로 `Attack_B` 또는 `Recovery_B` 중 추가 입력이 있으면 C가 예약된다. 한 구간에서 여러 번 눌러도 예약은 한 번만 된다.
 
 따라서 A가 시작된 직후에 세 번을 모두 눌러도 B만 예약된다. B가 시작된 뒤 B/Recovery_B 구간에서 한 번 더 눌러야 C까지 연결된다. 입력이 없으면 각 Recovery 끝의 `AN Combo Branch`가 콤보를 종료하고 Idle로 돌아간다.
+
+### 빠른 콤보 전환
+
+현재 수직 슬라이스에서는 C++를 바꾸지 않고 Montage Notify 위치로 전환 속도를 정한다. `Recovery_A`, `Recovery_B`의 기존 `AN Combo Branch`를 삭제한 뒤, 각각 **직전 Attack의 `ANS Melee Hit Window`가 끝난 직후** 또는 해당 Recovery 첫 프레임에 하나만 둔다.
+
+- Attack 중 입력은 이미 서버에 버퍼된다.
+- 이른 `AN Combo Branch`에 도달했을 때 입력이 버퍼돼 있으면, 남은 Recovery를 재생하지 않고 다음 Attack으로 즉시 전환한다.
+- 입력이 없으면 Combo 상태만 종료되고 현재 Recovery 애니메이션은 끝까지 재생한 뒤 Idle로 돌아간다.
+
+Branch보다 늦은 입력은 다음 타격으로 예약되지 않는다. 초반에는 Branch를 Recovery 시작 뒤 약 `0.10 ~ 0.15초`에 두고, 플레이 감각을 보며 앞뒤로 조정한다.
 
 ### 좌클릭해도 공격이 보이지 않을 때
 
@@ -123,7 +133,7 @@ Locomotion_BS → Slot (DefaultSlot) → Output Animation Pose
 | --- | --- |
 | Input Config Data Asset | 현재 프로젝트의 입력 설정 Data Asset |
 | Basic Attack Montage | `AM_Knight` |
-| Basic Attack Damage Effect | `BHAttributeSet.Health`에 음수 값을 적용하는 기존 Damage Gameplay Effect |
+| Basic Attack Damage Effect | 비워도 됨: C++ 기본 `BHGE_BasicAttackDamage`가 Health에 `-20`을 즉시 적용. 나중에 Blueprint Effect를 지정하면 그 값으로 교체 가능 |
 | Combo Attack Section Names | `Attack_A`, `Attack_B`, `Attack_C` |
 | Sword Trace Base/Tip Name | `FX_Sword_Bottom`, `FX_Sword_Top` |
 | Sword Trace Mid Name | 비움 (Base/Tip 중간 자동 보간) |

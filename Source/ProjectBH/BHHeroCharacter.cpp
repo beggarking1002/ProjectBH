@@ -4,6 +4,7 @@
 
 #include "BHGameplayTags.h"
 #include "AbilitySystem/BHAbilitySystemComponent.h"
+#include "AbilitySystem/GameplayEffects/BHGE_BasicAttackDamage.h"
 #include "ProjectBH.h"
 #include "AbilitySystemInterface.h"
 #include "Animation/AnimMontage.h"
@@ -43,6 +44,7 @@ ABHHeroCharacter::ABHHeroCharacter()
 	FollowCamera->bUsePawnControlRotation = false;
 
 	ComboAttackSectionNames = { TEXT("Attack_A"), TEXT("Attack_B"), TEXT("Attack_C") };
+	BasicAttackDamageEffect = UBHGE_BasicAttackDamage::StaticClass();
 }
 
 void ABHHeroCharacter::SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent)
@@ -309,6 +311,7 @@ void ABHHeroCharacter::ApplyBasicAttackDamage(const TArray<FHitResult>& HitResul
 		{
 			SourceAbilitySystem->ApplyGameplayEffectSpecToTarget(*EffectSpec.Data.Get(), TargetAbilitySystem);
 			DamagedActors.Add(HitActor);
+			UE_LOG(LogProjectBH, Display, TEXT("%s sword hit %s."), *GetName(), *HitActor->GetName());
 		}
 	}
 }
