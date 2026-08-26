@@ -14,20 +14,3 @@ void UBHHeroAnimInstance::NativeInitializeAnimation()
 		OwningHeroCharacter = Cast<ABHHeroCharacter>(OwningCharacter);
 	}
 }
-
-void UBHHeroAnimInstance::NativeThreadSafeUpdateAnimation(float DeltaSeconds)
-{
-	Super::NativeThreadSafeUpdateAnimation(DeltaSeconds);
-
-	if (bHasAcceleration)
-	{
-		IdleElapsedTime = 0.f;
-		bShouldEnterRelaxState = false;
-	}
-	else
-	{
-		IdleElapsedTime += DeltaSeconds;
-
-		bShouldEnterRelaxState = (IdleElapsedTime >= EnterRelaxStateThreshold);
-	}
-}

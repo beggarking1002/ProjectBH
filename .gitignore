@@ -65,3 +65,6 @@ ProjectBH/.trash/
 /Content/ParagonSparrow/
 /Content/ParagonTwinblast/
 /Content/ParagonWraith/
+
+# Local enemy assets not intended for repository sharing
+/Content/Enemy/Enemies/
