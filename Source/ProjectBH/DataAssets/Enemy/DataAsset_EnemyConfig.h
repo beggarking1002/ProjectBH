@@ -44,6 +44,34 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Movement", meta = (ClampMin = "0.0", Units = "cm/s"))
 	float MaxWalkSpeed = 300.0f;
 
+	/** Prevents the enemy that just finished attacking from immediately taking the slot back. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Engagement", meta = (ClampMin = "0.0", Units = "s"))
+	float AttackSlotReentryDelay = 1.0f;
+
+	/** Extra time allowed after the expected montage duration before forcing recovery. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat", meta = (ClampMin = "0.0", Units = "s"))
+	float AttackMontageFailSafeGrace = 0.5f;
+
+	/** Default stagger time after a successful damaging hit. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Reaction", meta = (ClampMin = "0.0", Units = "s"))
+	float StaggerDuration = 0.6f;
+
+	/** Optional. If unset, AnimBP can present the Staggered state directly. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Reaction")
+	TObjectPtr<UAnimMontage> HitReactMontage;
+
+	/** Optional. If unset, AnimBP can present the Dead state directly. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Reaction")
+	TObjectPtr<UAnimMontage> DeathMontage;
+
+	/** Delay before the dead enemy stops blocking navigation with its capsule. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Reaction", meta = (ClampMin = "0.0", Units = "s"))
+	float DeathCollisionDisableDelay = 0.2f;
+
+	/** Time before the dead actor is removed. Zero keeps it in the level. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Reaction", meta = (ClampMin = "0.0", Units = "s"))
+	float DeadActorLifeSpan = 5.0f;
+
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat")
 	FName DefaultAttackId = TEXT("BasicAttack");
 

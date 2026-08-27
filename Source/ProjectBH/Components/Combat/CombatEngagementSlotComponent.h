@@ -33,10 +33,10 @@ public:
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 	/** Keeps an existing Attack reservation or promotes a Wait reservation when a reachable-range slot is free. */
-	bool TryReserveAttackSlot(AActor* Requester, float MaxDistanceFromOwner);
+	bool TryReserveAttackSlot(AActor* Requester, float MaxDistanceFromOwner, int32 ExcludedSlotIndex = INDEX_NONE);
 
 	/** Keeps an existing Wait reservation or reserves one if the requester has no Attack slot. */
-	bool TryReserveWaitSlot(AActor* Requester);
+	bool TryReserveWaitSlot(AActor* Requester, int32 ExcludedSlotIndex = INDEX_NONE);
 
 	/** Returns the requester's current slot and its latest NavMesh-projected world position. */
 	bool GetReservedSlot(AActor* Requester, EBHCombatSlotType& OutSlotType, int32& OutSlotIndex, FVector& OutWorldLocation) const;
@@ -49,6 +49,12 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "Combat|Engagement Slots")
 	int32 GetWaitSlotCount() const { return WaitSlotCount; }
+
+	UFUNCTION(BlueprintPure, Category = "Debug|Engagement Slots")
+	int32 GetCurrentSpacingViolationCount() const { return CurrentSpacingViolationCount; }
+
+	UFUNCTION(BlueprintPure, Category = "Debug|Engagement Slots")
+	int32 GetPeakSpacingViolationCount() const { return PeakSpacingViolationCount; }
 
 protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Engagement Slots", meta = (ClampMin = "1", UIMin = "1"))
@@ -79,12 +85,17 @@ protected:
 private:
 	void InitializeSlots();
 	void PruneInvalidReservations();
-	bool TryReserveSlot(AActor* Requester, EBHCombatSlotType SlotType, float MaxDistanceFromOwner = -1.0f);
+	bool TryReserveSlot(AActor* Requester, EBHCombatSlotType SlotType, float MaxDistanceFromOwner = -1.0f, int32 ExcludedSlotIndex = INDEX_NONE);
 	bool FindReservation(const TArray<TWeakObjectPtr<AActor>>& Reservations, AActor* Requester, int32& OutSlotIndex) const;
 	bool GetSlotWorldLocation(EBHCombatSlotType SlotType, int32 SlotIndex, FVector& OutWorldLocation) const;
 	bool ProjectToNavigation(const FVector& DesiredLocation, FVector& OutProjectedLocation) const;
+	void UpdateDebugMetrics();
 	void DrawDebugSlots() const;
 
 	TArray<TWeakObjectPtr<AActor>> AttackReservations;
 	TArray<TWeakObjectPtr<AActor>> WaitReservations;
+	int32 CurrentSpacingViolationCount = 0;
+	int32 PeakSpacingViolationCount = 0;
+	int32 CurrentAttackingEnemyCount = 0;
+	int32 CurrentWaitAttackerCount = 0;
 };

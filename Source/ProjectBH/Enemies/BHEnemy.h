@@ -8,6 +8,7 @@
 
 class UAnimMontage;
 class UDataAsset_EnemyConfig;
+struct FOnAttributeChangeData;
 struct FBHAttackDefinitionRow;
 struct FBHEnemyAttackConfig;
 
@@ -17,7 +18,9 @@ enum class EBHEnemyCombatState : uint8
 {
 	Chasing,
 	Attacking,
-	Recovering
+	Recovering,
+	Staggered,
+	Dead
 };
 
 /**
@@ -51,7 +54,17 @@ public:
 	bool IsAttackLocked() const { return CombatState != EBHEnemyCombatState::Chasing; }
 
 	UFUNCTION(BlueprintPure, Category = "Combat|Enemy")
+	bool IsDead() const { return CombatState == EBHEnemyCombatState::Dead; }
+
+	UFUNCTION(BlueprintPure, Category = "Combat|Enemy")
 	float GetAttackStartRange() const;
+
+	UFUNCTION(BlueprintPure, Category = "Debug|Enemy")
+	int32 GetSuccessfulAttackStartCount() const { return SuccessfulAttackStartCount; }
+
+	/** Server-authoritative reaction entry point. A negative duration uses EnemyConfigDataAsset. */
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Combat|Enemy")
+	void StartStagger(float Duration = -1.0f);
 
 protected:
 	/** Movement and attack asset bindings. Numeric attack rules come from its DataTable row handles. */
@@ -70,9 +83,18 @@ private:
 	UFUNCTION(NetMulticast, Reliable)
 	void MulticastPlayBasicAttack(UAnimMontage* AttackMontage, FName MontageSection);
 
+	UFUNCTION(NetMulticast, Reliable)
+	void MulticastPlayReaction(UAnimMontage* ReactionMontage);
+
+	void HandleHealthChanged(const FOnAttributeChangeData& ChangeData);
 	void HandleAttackMontageEnded(UAnimMontage* Montage, bool bInterrupted);
+	void HandleAttackMontageFailSafe();
 	void BeginAttackRecovery();
 	void FinishAttackRecovery();
+	void FinishStagger();
+	void Die();
+	void DisableDeathCollision();
+	void ClearAttackContext();
 	bool IsAttackTargetInHitArea() const;
 	const FBHEnemyAttackConfig* GetAttackConfig(FName AttackId) const;
 	const FBHEnemyAttackConfig* GetDefaultAttackConfig() const;
@@ -95,6 +117,10 @@ private:
 	FName ActiveAttackMontageSection = NAME_None;
 
 	FTimerHandle AttackRecoveryTimerHandle;
+	FTimerHandle AttackMontageFailSafeTimerHandle;
+	FTimerHandle StaggerTimerHandle;
+	FTimerHandle DeathCollisionTimerHandle;
 	bool bLoggedInvalidAttackConfig = false;
 	bool bHasAppliedDamageThisAttack = false;
+	int32 SuccessfulAttackStartCount = 0;
 };

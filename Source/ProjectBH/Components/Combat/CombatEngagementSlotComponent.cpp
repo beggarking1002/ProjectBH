@@ -2,8 +2,13 @@
 
 #include "CombatEngagementSlotComponent.h"
 
+#include "../../AI/BHCrowdEnemyAIController.h"
+#include "../../BHHeroCharacter.h"
+#include "../../Enemies/BHEnemy.h"
 #include "AI/NavigationSystemBase.h"
+#include "Components/CapsuleComponent.h"
 #include "DrawDebugHelpers.h"
+#include "EngineUtils.h"
 #include "NavigationSystem.h"
 
 UCombatEngagementSlotComponent::UCombatEngagementSlotComponent()
@@ -38,10 +43,14 @@ void UCombatEngagementSlotComponent::TickComponent(float DeltaTime, ELevelTick T
 	}
 
 	PruneInvalidReservations();
+	UpdateDebugMetrics();
 	DrawDebugSlots();
 }
 
-bool UCombatEngagementSlotComponent::TryReserveAttackSlot(AActor* Requester, float MaxDistanceFromOwner)
+bool UCombatEngagementSlotComponent::TryReserveAttackSlot(
+	AActor* Requester,
+	float MaxDistanceFromOwner,
+	int32 ExcludedSlotIndex)
 {
 	if (!Requester || !GetOwner() || !GetOwner()->HasAuthority())
 	{
@@ -69,7 +78,7 @@ bool UCombatEngagementSlotComponent::TryReserveAttackSlot(AActor* Requester, flo
 		AttackReservations[ExistingAttackIndex].Reset();
 	}
 
-	if (!TryReserveSlot(Requester, EBHCombatSlotType::Attack, MaxDistanceFromOwner))
+	if (!TryReserveSlot(Requester, EBHCombatSlotType::Attack, MaxDistanceFromOwner, ExcludedSlotIndex))
 	{
 		return false;
 	}
@@ -85,7 +94,7 @@ bool UCombatEngagementSlotComponent::TryReserveAttackSlot(AActor* Requester, flo
 	return true;
 }
 
-bool UCombatEngagementSlotComponent::TryReserveWaitSlot(AActor* Requester)
+bool UCombatEngagementSlotComponent::TryReserveWaitSlot(AActor* Requester, int32 ExcludedSlotIndex)
 {
 	if (!Requester || !GetOwner() || !GetOwner()->HasAuthority())
 	{
@@ -106,7 +115,7 @@ bool UCombatEngagementSlotComponent::TryReserveWaitSlot(AActor* Requester)
 		return true;
 	}
 
-	return TryReserveSlot(Requester, EBHCombatSlotType::Wait);
+	return TryReserveSlot(Requester, EBHCombatSlotType::Wait, -1.0f, ExcludedSlotIndex);
 }
 
 bool UCombatEngagementSlotComponent::GetReservedSlot(
@@ -191,7 +200,8 @@ void UCombatEngagementSlotComponent::PruneInvalidReservations()
 bool UCombatEngagementSlotComponent::TryReserveSlot(
 	AActor* Requester,
 	EBHCombatSlotType SlotType,
-	float MaxDistanceFromOwner)
+	float MaxDistanceFromOwner,
+	int32 ExcludedSlotIndex)
 {
 	TArray<TWeakObjectPtr<AActor>>* Reservations = nullptr;
 	switch (SlotType)
@@ -210,6 +220,11 @@ bool UCombatEngagementSlotComponent::TryReserveSlot(
 	float BestDistanceSquared = TNumericLimits<float>::Max();
 	for (int32 SlotIndex = 0; SlotIndex < Reservations->Num(); ++SlotIndex)
 	{
+		if (SlotIndex == ExcludedSlotIndex)
+		{
+			continue;
+		}
+
 		if ((*Reservations)[SlotIndex].IsValid())
 		{
 			continue;
@@ -304,6 +319,85 @@ bool UCombatEngagementSlotComponent::ProjectToNavigation(const FVector& DesiredL
 	return true;
 }
 
+void UCombatEngagementSlotComponent::UpdateDebugMetrics()
+{
+	CurrentSpacingViolationCount = 0;
+	CurrentAttackingEnemyCount = 0;
+	CurrentWaitAttackerCount = 0;
+
+	UWorld* World = GetWorld();
+	AActor* Owner = GetOwner();
+	if (!World || !Owner)
+	{
+		return;
+	}
+
+	TArray<ABHEnemy*, TInlineAllocator<16>> EngagedEnemies;
+	for (TActorIterator<ABHEnemy> It(World); It; ++It)
+	{
+		ABHEnemy* Enemy = *It;
+		const ABHCrowdEnemyAIController* Controller = Enemy
+			? Cast<ABHCrowdEnemyAIController>(Enemy->GetController())
+			: nullptr;
+		if (!Controller || Controller->GetCurrentTarget() != Owner)
+		{
+			continue;
+		}
+
+		EngagedEnemies.Add(Enemy);
+		if (Enemy->GetCombatState() == EBHEnemyCombatState::Attacking)
+		{
+			++CurrentAttackingEnemyCount;
+			int32 WaitSlotIndex = INDEX_NONE;
+			if (FindReservation(WaitReservations, Enemy, WaitSlotIndex))
+			{
+				++CurrentWaitAttackerCount;
+			}
+		}
+	}
+
+	for (int32 FirstIndex = 0; FirstIndex < EngagedEnemies.Num(); ++FirstIndex)
+	{
+		const ABHEnemy* FirstEnemy = EngagedEnemies[FirstIndex];
+		const UCapsuleComponent* FirstCapsule = FirstEnemy ? FirstEnemy->GetCapsuleComponent() : nullptr;
+		if (!FirstCapsule)
+		{
+			continue;
+		}
+
+		for (int32 SecondIndex = FirstIndex + 1; SecondIndex < EngagedEnemies.Num(); ++SecondIndex)
+		{
+			const ABHEnemy* SecondEnemy = EngagedEnemies[SecondIndex];
+			const UCapsuleComponent* SecondCapsule = SecondEnemy ? SecondEnemy->GetCapsuleComponent() : nullptr;
+			if (!SecondCapsule)
+			{
+				continue;
+			}
+
+			const FVector FirstLocation = FirstEnemy->GetActorLocation();
+			const FVector SecondLocation = SecondEnemy->GetActorLocation();
+			const float SameLayerTolerance = FMath::Max(
+				FirstCapsule->GetScaledCapsuleHalfHeight(),
+				SecondCapsule->GetScaledCapsuleHalfHeight());
+			if (FMath::Abs(FirstLocation.Z - SecondLocation.Z) > SameLayerTolerance)
+			{
+				continue;
+			}
+
+			const float MinimumSpacing = FirstCapsule->GetScaledCapsuleRadius()
+				+ SecondCapsule->GetScaledCapsuleRadius()
+				- 5.0f;
+			if (FVector::DistSquared2D(FirstLocation, SecondLocation) < FMath::Square(MinimumSpacing))
+			{
+				++CurrentSpacingViolationCount;
+				DrawDebugLine(World, FirstLocation, SecondLocation, FColor::Magenta, false, 0.12f, 0, 3.0f);
+			}
+		}
+	}
+
+	PeakSpacingViolationCount = FMath::Max(PeakSpacingViolationCount, CurrentSpacingViolationCount);
+}
+
 void UCombatEngagementSlotComponent::DrawDebugSlots() const
 {
 	const UWorld* World = GetWorld();
@@ -331,4 +425,36 @@ void UCombatEngagementSlotComponent::DrawDebugSlots() const
 			DrawDebugSphere(World, SlotLocation, 16.0f, 10, Color, false, 0.12f, 0, 1.5f);
 		}
 	}
+
+	int32 OccupiedAttackSlots = 0;
+	for (const TWeakObjectPtr<AActor>& Reservation : AttackReservations)
+	{
+		OccupiedAttackSlots += Reservation.IsValid() ? 1 : 0;
+	}
+
+	int32 OccupiedWaitSlots = 0;
+	for (const TWeakObjectPtr<AActor>& Reservation : WaitReservations)
+	{
+		OccupiedWaitSlots += Reservation.IsValid() ? 1 : 0;
+	}
+
+	const FString DebugText = FString::Printf(
+		TEXT("Slots A:%d/%d W:%d/%d | Attacking:%d WaitAttack:%d | Spacing:%d Peak:%d"),
+		OccupiedAttackSlots,
+		AttackReservations.Num(),
+		OccupiedWaitSlots,
+		WaitReservations.Num(),
+		CurrentAttackingEnemyCount,
+		CurrentWaitAttackerCount,
+		CurrentSpacingViolationCount,
+		PeakSpacingViolationCount);
+	DrawDebugString(
+		World,
+		GetOwner()->GetActorLocation() + FVector(0.0f, 0.0f, 170.0f),
+		DebugText,
+		nullptr,
+		CurrentWaitAttackerCount > 0 ? FColor::Red : FColor::White,
+		0.12f,
+		false,
+		1.1f);
 }

@@ -13,6 +13,7 @@
 #include "AbilitySystemInterface.h"
 #include "Animation/AnimInstance.h"
 #include "Animation/AnimMontage.h"
+#include "Components/CapsuleComponent.h"
 #include "GameFramework/Controller.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameplayEffect.h"
@@ -38,6 +39,18 @@ void ABHEnemy::BeginPlay()
 	if (EnemyConfigDataAsset)
 	{
 		GetCharacterMovement()->MaxWalkSpeed = EnemyConfigDataAsset->MaxWalkSpeed;
+	}
+
+	if (HasAuthority() && GetBHAbilitySystemComponent())
+	{
+		GetBHAbilitySystemComponent()
+			->GetGameplayAttributeValueChangeDelegate(UBHAttributeSet::GetHealthAttribute())
+			.AddUObject(this, &ThisClass::HandleHealthChanged);
+
+		if (GetBHAbilitySystemComponent()->GetNumericAttribute(UBHAttributeSet::GetHealthAttribute()) <= 0.0f)
+		{
+			Die();
+		}
 	}
 }
 
@@ -92,6 +105,7 @@ bool ABHEnemy::TryStartBasicAttack(AActor* TargetActor)
 
 	bLoggedInvalidAttackConfig = false;
 	GetWorldTimerManager().ClearTimer(AttackRecoveryTimerHandle);
+	GetWorldTimerManager().ClearTimer(AttackMontageFailSafeTimerHandle);
 	AttackTarget = TargetActor;
 	ActiveAttackId = AttackConfig->AttackId;
 	ActiveAttackMontage = AttackConfig->Montage;
@@ -138,10 +152,90 @@ void ABHEnemy::MulticastPlayBasicAttack_Implementation(UAnimMontage* AttackMonta
 		BeginAttackRecovery();
 		return;
 	}
+	++SuccessfulAttackStartCount;
 
 	FOnMontageEnded MontageEndedDelegate;
 	MontageEndedDelegate.BindUObject(this, &ThisClass::HandleAttackMontageEnded);
 	AnimInstance->Montage_SetEndDelegate(MontageEndedDelegate, ActiveAttackMontage);
+
+	const float FailSafeGrace = EnemyConfigDataAsset
+		? EnemyConfigDataAsset->AttackMontageFailSafeGrace
+		: 0.5f;
+	GetWorldTimerManager().SetTimer(
+		AttackMontageFailSafeTimerHandle,
+		this,
+		&ThisClass::HandleAttackMontageFailSafe,
+		MontageDuration + FailSafeGrace,
+		false);
+}
+
+void ABHEnemy::MulticastPlayReaction_Implementation(UAnimMontage* ReactionMontage)
+{
+	StopAnimMontage();
+	if (ReactionMontage)
+	{
+		PlayAnimMontage(ReactionMontage);
+	}
+}
+
+void ABHEnemy::HandleHealthChanged(const FOnAttributeChangeData& ChangeData)
+{
+	if (!HasAuthority() || IsDead() || ChangeData.NewValue >= ChangeData.OldValue)
+	{
+		return;
+	}
+
+	if (ChangeData.NewValue <= 0.0f)
+	{
+		Die();
+		return;
+	}
+
+	StartStagger();
+}
+
+void ABHEnemy::StartStagger(float Duration)
+{
+	if (!HasAuthority() || IsDead())
+	{
+		return;
+	}
+
+	GetWorldTimerManager().ClearTimer(AttackRecoveryTimerHandle);
+	GetWorldTimerManager().ClearTimer(AttackMontageFailSafeTimerHandle);
+	GetWorldTimerManager().ClearTimer(StaggerTimerHandle);
+	ClearAttackContext();
+	SetCombatState(EBHEnemyCombatState::Staggered);
+
+	if (ABHCrowdEnemyAIController* CrowdController = Cast<ABHCrowdEnemyAIController>(GetController()))
+	{
+		CrowdController->ReleaseCombatSlot(EBHCombatSlotReleaseReason::Staggered);
+		CrowdController->StopMovement();
+	}
+	GetCharacterMovement()->StopMovementImmediately();
+
+	MulticastPlayReaction(EnemyConfigDataAsset ? EnemyConfigDataAsset->HitReactMontage : nullptr);
+	float ResolvedDuration = Duration >= 0.0f
+		? Duration
+		: (EnemyConfigDataAsset ? EnemyConfigDataAsset->StaggerDuration : 0.6f);
+	if (Duration < 0.0f && EnemyConfigDataAsset && EnemyConfigDataAsset->HitReactMontage)
+	{
+		ResolvedDuration = FMath::Max(
+			ResolvedDuration,
+			EnemyConfigDataAsset->HitReactMontage->GetPlayLength());
+	}
+	if (ResolvedDuration <= 0.0f)
+	{
+		FinishStagger();
+		return;
+	}
+
+	GetWorldTimerManager().SetTimer(
+		StaggerTimerHandle,
+		this,
+		&ThisClass::FinishStagger,
+		ResolvedDuration,
+		false);
 }
 
 void ABHEnemy::PerformBasicAttackHit()
@@ -198,6 +292,19 @@ void ABHEnemy::HandleAttackMontageEnded(UAnimMontage* Montage, bool bInterrupted
 		return;
 	}
 
+	GetWorldTimerManager().ClearTimer(AttackMontageFailSafeTimerHandle);
+	BeginAttackRecovery();
+}
+
+void ABHEnemy::HandleAttackMontageFailSafe()
+{
+	if (!HasAuthority() || CombatState != EBHEnemyCombatState::Attacking)
+	{
+		return;
+	}
+
+	UE_LOG(LogProjectBH, Warning, TEXT("%s attack montage did not finish in time; forcing recovery."), *GetName());
+	MulticastPlayReaction(nullptr);
 	BeginAttackRecovery();
 }
 
@@ -208,6 +315,7 @@ void ABHEnemy::BeginAttackRecovery()
 		return;
 	}
 
+	GetWorldTimerManager().ClearTimer(AttackMontageFailSafeTimerHandle);
 	SetCombatState(EBHEnemyCombatState::Recovering);
 	const FBHAttackDefinitionRow* AttackDefinition = GetActiveAttackDefinition();
 	const float RecoveryDuration = AttackDefinition ? AttackDefinition->RecoveryDuration : 0.0f;
@@ -227,17 +335,101 @@ void ABHEnemy::BeginAttackRecovery()
 
 void ABHEnemy::FinishAttackRecovery()
 {
-	if (!HasAuthority())
+	if (!HasAuthority() || CombatState != EBHEnemyCombatState::Recovering)
 	{
 		return;
 	}
 
+	ClearAttackContext();
+	SetCombatState(EBHEnemyCombatState::Chasing);
+	if (ABHCrowdEnemyAIController* CrowdController = Cast<ABHCrowdEnemyAIController>(GetController()))
+	{
+		const float ReentryDelay = EnemyConfigDataAsset
+			? EnemyConfigDataAsset->AttackSlotReentryDelay
+			: 1.0f;
+		CrowdController->ReleaseCombatSlot(
+			EBHCombatSlotReleaseReason::AttackRecoveryComplete,
+			ReentryDelay);
+	}
+}
+
+void ABHEnemy::FinishStagger()
+{
+	if (!HasAuthority() || CombatState != EBHEnemyCombatState::Staggered)
+	{
+		return;
+	}
+
+	MulticastPlayReaction(nullptr);
+	SetCombatState(EBHEnemyCombatState::Chasing);
+}
+
+void ABHEnemy::Die()
+{
+	if (!HasAuthority() || IsDead())
+	{
+		return;
+	}
+
+	GetWorldTimerManager().ClearTimer(AttackRecoveryTimerHandle);
+	GetWorldTimerManager().ClearTimer(AttackMontageFailSafeTimerHandle);
+	GetWorldTimerManager().ClearTimer(StaggerTimerHandle);
+	ClearAttackContext();
+	SetCombatState(EBHEnemyCombatState::Dead);
+
+	if (ABHCrowdEnemyAIController* CrowdController = Cast<ABHCrowdEnemyAIController>(GetController()))
+	{
+		CrowdController->ReleaseCombatSlot(EBHCombatSlotReleaseReason::Died);
+		CrowdController->StopMovement();
+	}
+	GetCharacterMovement()->StopMovementImmediately();
+	GetCharacterMovement()->DisableMovement();
+
+	MulticastPlayReaction(EnemyConfigDataAsset ? EnemyConfigDataAsset->DeathMontage : nullptr);
+
+	const float CollisionDisableDelay = EnemyConfigDataAsset
+		? EnemyConfigDataAsset->DeathCollisionDisableDelay
+		: 0.2f;
+	if (CollisionDisableDelay <= 0.0f)
+	{
+		DisableDeathCollision();
+	}
+	else
+	{
+		GetWorldTimerManager().SetTimer(
+			DeathCollisionTimerHandle,
+			this,
+			&ThisClass::DisableDeathCollision,
+			CollisionDisableDelay,
+			false);
+	}
+
+	const float DeadActorLifeSpan = EnemyConfigDataAsset
+		? EnemyConfigDataAsset->DeadActorLifeSpan
+		: 5.0f;
+	if (DeadActorLifeSpan > 0.0f)
+	{
+		SetLifeSpan(DeadActorLifeSpan);
+	}
+
+	DetachFromControllerPendingDestroy();
+}
+
+void ABHEnemy::DisableDeathCollision()
+{
+	if (GetCapsuleComponent())
+	{
+		GetCapsuleComponent()->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	}
+}
+
+void ABHEnemy::ClearAttackContext()
+{
 	AttackTarget = nullptr;
 	ActiveAttackMontage = nullptr;
 	ActiveAttackId = NAME_None;
 	ActiveAttackMontageSection = NAME_None;
 	bHasAppliedDamageThisAttack = false;
-	SetCombatState(EBHEnemyCombatState::Chasing);
 }
 
 bool ABHEnemy::IsAttackTargetInHitArea() const
@@ -333,8 +525,18 @@ FName ABHEnemy::SelectRandomMontageSection(const FBHEnemyAttackConfig& AttackCon
 
 void ABHEnemy::SetCombatState(EBHEnemyCombatState NewState)
 {
-	if (HasAuthority())
+	if (!HasAuthority() || CombatState == NewState)
 	{
-		CombatState = NewState;
+		return;
 	}
+
+	const EBHEnemyCombatState PreviousState = CombatState;
+	CombatState = NewState;
+	UE_LOG(
+		LogProjectBH,
+		Display,
+		TEXT("%s combat state: %s -> %s"),
+		*GetName(),
+		*StaticEnum<EBHEnemyCombatState>()->GetNameStringByValue(static_cast<int64>(PreviousState)),
+		*StaticEnum<EBHEnemyCombatState>()->GetNameStringByValue(static_cast<int64>(NewState)));
 }
