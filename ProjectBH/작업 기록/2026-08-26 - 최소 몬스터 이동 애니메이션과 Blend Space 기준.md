@@ -42,6 +42,42 @@
 
 그래도 한 번 재생 후 멈추면 State Machine Transition을 확인한다. Locomotion State에서 다른 State로 자동 이동하는 Transition이 있거나, State의 최종 출력이 Blend Space Player가 아닌 단발 Sequence Player로 연결돼 있으면 그 경로를 수정한다.
 
+### AI 추적 시작·정지 시 Idle/Walk가 끊길 때
+
+`Guardian_BS` 안에 이미 Idle 샘플과 Walk 샘플이 있으므로, 기본 이동은 별도 `Idle`/`Jog` 상태 둘로 나누지 않고 **하나의 `Locomotion` 상태에서 Blend Space Player 하나로 처리**하는 것을 우선 권장한다.
+
+```text
+Entry → Locomotion(Guardian_BS) → Output Pose
+```
+
+- `GroundSpeed = 0`: Idle 샘플
+- `GroundSpeed = 실제 보행 속도`: Walk 샘플
+- Blend Space의 `GroundSpeed` 축 `Smoothing Time`: 우선 0.15~0.25초
+- `Smoothing Type`: 우선 `Ease In/Out` 또는 `Cubic`
+
+이 구성에서는 State Transition이 아니라 Blend Space가 Idle과 Walk의 포즈를 연속적으로 섞는다.
+
+별도의 Idle/Jog 상태를 유지해야 한다면 두 전환 화살표를 각각 선택해 `Blend Settings`를 설정한다.
+
+- `Duration`: 우선 0.15~0.25초
+- `Mode`: `Cubic` 또는 다른 Ease In/Out 계열
+- `Idle → Jog`: `GroundSpeed > 10`
+- `Jog → Idle`: `GroundSpeed < 5`
+
+`Duration = 0`이면 조건이 참이 되는 프레임에 포즈가 즉시 바뀌어 끊겨 보인다. 너무 긴 Duration은 발 미끄러짐과 반응 지연을 만들 수 있으므로 짧은 값부터 조정한다.
+
+그래도 튄다면 다음을 확인한다.
+
+1. Idle과 Walk 양쪽 Animation Sequence의 Loop 설정과 Blend Space Player의 Loop가 켜져 있는가.
+2. 두 애니메이션의 Root/Pelvis 시작 위치와 리타게팅 기준 포즈가 크게 다르지 않은가.
+3. Enemy의 실제 `GroundSpeed`가 Blend Space Speed 축 최대값을 크게 벗어나지 않는가.
+4. AI 이동 시작 때 `GroundSpeed`가 0에서 큰 값으로 즉시 뛰면 축 Smoothing Time이 적용되는가.
+
+참고:
+
+- [Epic Games: Blend Spaces](https://dev.epicgames.com/documentation/en-us/unreal-engine/blend-spaces-in-unreal-engine)
+- [Epic Games: Transition Rules](https://dev.epicgames.com/documentation/unreal-engine/transition-rules-in-unreal-engine?lang=en-US)
+
 ## 추후 스트레이프 확장
 
 적이 플레이어를 바라본 채 좌·우·후방으로 움직이는 행동이 필요해질 때만 2D Blend Space를 만든다.

@@ -68,3 +68,6 @@ ProjectBH/.trash/
 
 # Local enemy assets not intended for repository sharing
 /Content/Enemy/Enemies/
+
+# Imported Medieval Castle environment pack; restore from the original asset source
+/Content/MedCastle/
