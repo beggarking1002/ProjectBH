@@ -1,0 +1,90 @@
+// Copyright ProjectBH. All Rights Reserved.
+
+#pragma once
+
+#include "CoreMinimal.h"
+#include "Components/ActorComponent.h"
+#include "CombatEngagementSlotComponent.generated.h"
+
+UENUM(BlueprintType)
+enum class EBHCombatSlotType : uint8
+{
+	None,
+	Attack,
+	Wait
+};
+
+/**
+ * Server-authoritative reservation manager for combat positions around its owner.
+ *
+ * Slots are world-aligned rings around the owner. Their current positions are
+ * projected onto NavMesh whenever an enemy requests or reads a reservation.
+ */
+UCLASS(ClassGroup = (Combat), meta = (BlueprintSpawnableComponent))
+class PROJECTBH_API UCombatEngagementSlotComponent : public UActorComponent
+{
+	GENERATED_BODY()
+
+public:
+	UCombatEngagementSlotComponent();
+
+	virtual void BeginPlay() override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+
+	/** Keeps an existing Attack reservation or promotes a Wait reservation when a reachable-range slot is free. */
+	bool TryReserveAttackSlot(AActor* Requester, float MaxDistanceFromOwner);
+
+	/** Keeps an existing Wait reservation or reserves one if the requester has no Attack slot. */
+	bool TryReserveWaitSlot(AActor* Requester);
+
+	/** Returns the requester's current slot and its latest NavMesh-projected world position. */
+	bool GetReservedSlot(AActor* Requester, EBHCombatSlotType& OutSlotType, int32& OutSlotIndex, FVector& OutWorldLocation) const;
+
+	/** Releases every slot owned by Requester. Safe to call repeatedly. */
+	void ReleaseSlot(AActor* Requester);
+
+	UFUNCTION(BlueprintPure, Category = "Combat|Engagement Slots")
+	int32 GetAttackSlotCount() const { return AttackSlotCount; }
+
+	UFUNCTION(BlueprintPure, Category = "Combat|Engagement Slots")
+	int32 GetWaitSlotCount() const { return WaitSlotCount; }
+
+protected:
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Engagement Slots", meta = (ClampMin = "1", UIMin = "1"))
+	int32 AttackSlotCount = 4;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Engagement Slots", meta = (ClampMin = "1", UIMin = "1"))
+	int32 WaitSlotCount = 8;
+
+	/** Kept inside the current 150-unit basic attack start range. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Engagement Slots", meta = (ClampMin = "0.0", Units = "cm"))
+	float AttackRingRadius = 125.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Engagement Slots", meta = (ClampMin = "0.0", Units = "cm"))
+	float WaitRingRadius = 300.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Engagement Slots", meta = (Units = "deg"))
+	float AttackRingAngleOffset = 45.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Engagement Slots", meta = (Units = "deg"))
+	float WaitRingAngleOffset = 0.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Engagement Slots")
+	FVector NavProjectionExtent = FVector(50.0f, 50.0f, 200.0f);
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Debug|Engagement Slots")
+	bool bDrawDebugSlots = true;
+
+private:
+	void InitializeSlots();
+	void PruneInvalidReservations();
+	bool TryReserveSlot(AActor* Requester, EBHCombatSlotType SlotType, float MaxDistanceFromOwner = -1.0f);
+	bool FindReservation(const TArray<TWeakObjectPtr<AActor>>& Reservations, AActor* Requester, int32& OutSlotIndex) const;
+	bool GetSlotWorldLocation(EBHCombatSlotType SlotType, int32 SlotIndex, FVector& OutWorldLocation) const;
+	bool ProjectToNavigation(const FVector& DesiredLocation, FVector& OutProjectedLocation) const;
+	void DrawDebugSlots() const;
+
+	TArray<TWeakObjectPtr<AActor>> AttackReservations;
+	TArray<TWeakObjectPtr<AActor>> WaitReservations;
+};

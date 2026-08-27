@@ -11,6 +11,7 @@ class USpringArmComponent;
 class UDataAsset_InputConfig;
 class UGameplayEffect;
 class UAnimMontage;
+class UCombatEngagementSlotComponent;
 struct FInputActionValue;
 
 /** Player-controlled character foundation for the first combat slice. */
@@ -23,6 +24,7 @@ public:
 	ABHHeroCharacter();
 
 	UCameraComponent* GetFollowCamera() const { return FollowCamera; }
+	UCombatEngagementSlotComponent* GetCombatEngagementSlotComponent() const { return CombatEngagementSlots; }
 
 	/** Legacy one-frame attack notify support. New montages should use ANS Melee Hit Window. */
 	void PerformBasicAttackHit();
@@ -45,6 +47,10 @@ protected:
 	/** Player view camera attached to the end of CameraBoom. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Camera", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<UCameraComponent> FollowCamera;
+
+	/** Owns the server-authoritative Attack and Wait positions around this hero. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat|Engagement Slots", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<UCombatEngagementSlotComponent> CombatEngagementSlots;
 	
 #pragma region Inputs
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "CharacterData", meta = (AllowPrivateAccess = "true"))

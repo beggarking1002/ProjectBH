@@ -13,6 +13,7 @@ public class ProjectBH : ModuleRules
 			"CoreUObject",
 			"Engine",
 			"AIModule",
+			"NavigationSystem",
 			"InputCore",
 			"EnhancedInput",
 			"GameplayAbilities",
