@@ -101,6 +101,7 @@ private:
 	TWeakObjectPtr<AActor> CurrentSlotRequester;
 	FVector LastRequestedSlotLocation = FVector::ZeroVector;
 	bool bHasRequestedSlotMove = false;
+	bool bIsUsingStagedRoute = false;
 
 	EBHCombatSlotType TrackedSlotType = EBHCombatSlotType::None;
 	int32 TrackedSlotIndex = INDEX_NONE;

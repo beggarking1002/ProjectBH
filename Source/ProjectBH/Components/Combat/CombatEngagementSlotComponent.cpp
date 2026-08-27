@@ -155,6 +155,79 @@ bool UCombatEngagementSlotComponent::GetReservedSlot(
 	return false;
 }
 
+bool UCombatEngagementSlotComponent::GetMoveGoalForReservedSlot(
+	AActor* Requester,
+	EBHCombatSlotType SlotType,
+	int32 SlotIndex,
+	const FVector& FinalSlotLocation,
+	FVector& OutMoveGoal,
+	bool& bOutUsesStagedRoute) const
+{
+	OutMoveGoal = FinalSlotLocation;
+	bOutUsesStagedRoute = false;
+
+	const AActor* Owner = GetOwner();
+	if (!Requester || !Owner || SlotType == EBHCombatSlotType::None || SlotIndex == INDEX_NONE)
+	{
+		return false;
+	}
+
+	const FVector RequesterLocation = Requester->GetActorLocation();
+	if (!DoesSegmentCrossCombatCore(RequesterLocation, FinalSlotLocation))
+	{
+		return true;
+	}
+
+	const FVector OwnerLocation = Owner->GetActorLocation();
+	FVector RequesterDirection = RequesterLocation - OwnerLocation;
+	RequesterDirection.Z = 0.0f;
+	FVector TargetDirection = FinalSlotLocation - OwnerLocation;
+	TargetDirection.Z = 0.0f;
+	if (TargetDirection.IsNearlyZero())
+	{
+		return false;
+	}
+
+	TargetDirection.Normalize();
+	if (RequesterDirection.IsNearlyZero())
+	{
+		RequesterDirection = -TargetDirection;
+	}
+	const float RequesterRadius = RequesterDirection.Size2D();
+	RequesterDirection.Normalize();
+
+	const float OrbitRadius = FMath::Max3(
+		WaitRingRadius,
+		AttackRingRadius + OrbitRingAcceptanceRadius,
+		GetEffectiveCombatCoreRadius() + OrbitRingAcceptanceRadius);
+	FVector DesiredWaypoint;
+	if (FMath::Abs(RequesterRadius - OrbitRadius) > OrbitRingAcceptanceRadius)
+	{
+		DesiredWaypoint = OwnerLocation + RequesterDirection * OrbitRadius;
+	}
+	else
+	{
+		const float RequesterAngle = FMath::RadiansToDegrees(FMath::Atan2(RequesterDirection.Y, RequesterDirection.X));
+		const float TargetAngle = FMath::RadiansToDegrees(FMath::Atan2(TargetDirection.Y, TargetDirection.X));
+		const float DeltaAngle = FMath::FindDeltaAngleDegrees(RequesterAngle, TargetAngle);
+		const float StepAngle = FMath::Clamp(
+			DeltaAngle,
+			-OrbitWaypointAngleStep,
+			OrbitWaypointAngleStep);
+		const float NextAngleRadians = FMath::DegreesToRadians(RequesterAngle + StepAngle);
+		DesiredWaypoint = OwnerLocation
+			+ FVector(FMath::Cos(NextAngleRadians), FMath::Sin(NextAngleRadians), 0.0f) * OrbitRadius;
+	}
+
+	if (!ProjectToNavigation(DesiredWaypoint, OutMoveGoal))
+	{
+		return false;
+	}
+
+	bOutUsesStagedRoute = true;
+	return true;
+}
+
 void UCombatEngagementSlotComponent::ReleaseSlot(AActor* Requester)
 {
 	if (!Requester || !GetOwner() || !GetOwner()->HasAuthority())
@@ -326,6 +399,7 @@ bool UCombatEngagementSlotComponent::TryReserveSlot(
 
 	int32 BestSlotIndex = INDEX_NONE;
 	float BestDistanceSquared = TNumericLimits<float>::Max();
+	bool bBestSlotNeedsStagedRoute = true;
 	for (int32 SlotIndex = 0; SlotIndex < Reservations->Num(); ++SlotIndex)
 	{
 		if (SlotIndex == ExcludedSlotIndex)
@@ -352,10 +426,15 @@ bool UCombatEngagementSlotComponent::TryReserveSlot(
 		}
 
 		const float DistanceSquared = FVector::DistSquared2D(Requester->GetActorLocation(), SlotLocation);
-		if (DistanceSquared < BestDistanceSquared)
+		const bool bNeedsStagedRoute = DoesSegmentCrossCombatCore(Requester->GetActorLocation(), SlotLocation);
+		const bool bPreferDirectSlot = bBestSlotNeedsStagedRoute && !bNeedsStagedRoute;
+		if (BestSlotIndex == INDEX_NONE
+			|| bPreferDirectSlot
+			|| (bBestSlotNeedsStagedRoute == bNeedsStagedRoute && DistanceSquared < BestDistanceSquared))
 		{
 			BestDistanceSquared = DistanceSquared;
 			BestSlotIndex = SlotIndex;
+			bBestSlotNeedsStagedRoute = bNeedsStagedRoute;
 		}
 	}
 
@@ -406,6 +485,50 @@ bool UCombatEngagementSlotComponent::GetSlotWorldLocation(
 	const FVector DesiredLocation = Owner->GetActorLocation() + RingDirection * RingRadius;
 
 	return ProjectToNavigation(DesiredLocation, OutWorldLocation);
+}
+
+bool UCombatEngagementSlotComponent::DoesSegmentCrossCombatCore(
+	const FVector& SegmentStart,
+	const FVector& SegmentEnd) const
+{
+	const AActor* Owner = GetOwner();
+	if (!Owner)
+	{
+		return false;
+	}
+
+	const FVector2D Center(Owner->GetActorLocation());
+	const FVector2D Start(SegmentStart);
+	const FVector2D End(SegmentEnd);
+	const FVector2D Segment = End - Start;
+	const float SegmentLengthSquared = Segment.SizeSquared();
+	const float EndRadius = FVector2D::Distance(Center, End);
+	const float EffectiveRadius = FMath::Min(
+		GetEffectiveCombatCoreRadius(),
+		FMath::Max(0.0f, EndRadius - 5.0f));
+	if (EffectiveRadius <= 0.0f)
+	{
+		return false;
+	}
+
+	if (SegmentLengthSquared <= UE_KINDA_SMALL_NUMBER)
+	{
+		return FVector2D::DistSquared(Start, Center) < FMath::Square(EffectiveRadius);
+	}
+
+	const float ClosestAlpha = FMath::Clamp(
+		FVector2D::DotProduct(Center - Start, Segment) / SegmentLengthSquared,
+		0.0f,
+		1.0f);
+	const FVector2D ClosestPoint = Start + Segment * ClosestAlpha;
+	return FVector2D::DistSquared(ClosestPoint, Center) < FMath::Square(EffectiveRadius);
+}
+
+float UCombatEngagementSlotComponent::GetEffectiveCombatCoreRadius() const
+{
+	return FMath::Min(
+		FMath::Max(0.0f, CombatCoreRadius),
+		FMath::Max(0.0f, AttackRingRadius - 5.0f));
 }
 
 bool UCombatEngagementSlotComponent::ProjectToNavigation(const FVector& DesiredLocation, FVector& OutProjectedLocation) const
@@ -509,10 +632,25 @@ void UCombatEngagementSlotComponent::UpdateDebugMetrics()
 void UCombatEngagementSlotComponent::DrawDebugSlots() const
 {
 	const UWorld* World = GetWorld();
-	if (!World)
+	const AActor* Owner = GetOwner();
+	if (!World || !Owner)
 	{
 		return;
 	}
+
+	DrawDebugCircle(
+		World,
+		Owner->GetActorLocation(),
+		GetEffectiveCombatCoreRadius(),
+		48,
+		FColor::Orange,
+		false,
+		0.12f,
+		0,
+		2.0f,
+		FVector::ForwardVector,
+		FVector::RightVector,
+		false);
 
 	for (int32 SlotIndex = 0; SlotIndex < AttackReservations.Num(); ++SlotIndex)
 	{
@@ -559,7 +697,7 @@ void UCombatEngagementSlotComponent::DrawDebugSlots() const
 		PeakSpacingViolationCount);
 	DrawDebugString(
 		World,
-		GetOwner()->GetActorLocation() + FVector(0.0f, 0.0f, 170.0f),
+		Owner->GetActorLocation() + FVector(0.0f, 0.0f, 170.0f),
 		DebugText,
 		nullptr,
 		CurrentWaitAttackerCount > 0 ? FColor::Red : FColor::White,

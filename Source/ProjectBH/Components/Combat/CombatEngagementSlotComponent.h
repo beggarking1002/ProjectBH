@@ -41,6 +41,15 @@ public:
 	/** Returns the requester's current slot and its latest NavMesh-projected world position. */
 	bool GetReservedSlot(AActor* Requester, EBHCombatSlotType& OutSlotType, int32& OutSlotIndex, FVector& OutWorldLocation) const;
 
+	/** Resolves either the final slot or the next Wait Ring waypoint without crossing the player's Combat Core. */
+	bool GetMoveGoalForReservedSlot(
+		AActor* Requester,
+		EBHCombatSlotType SlotType,
+		int32 SlotIndex,
+		const FVector& FinalSlotLocation,
+		FVector& OutMoveGoal,
+		bool& bOutUsesStagedRoute) const;
+
 	/** Releases every slot owned by Requester. Safe to call repeatedly. */
 	void ReleaseSlot(AActor* Requester);
 
@@ -74,6 +83,18 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Engagement Slots", meta = (ClampMin = "0.0", Units = "cm"))
 	float WaitRingRadius = 300.0f;
 
+	/** Enemy routes cannot directly cross this player-centered radius. Kept below the Attack Ring radius at runtime. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Approach Routing", meta = (ClampMin = "0.0", Units = "cm"))
+	float CombatCoreRadius = 100.0f;
+
+	/** Maximum angular step for one orbit waypoint around the Wait Ring. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Approach Routing", meta = (ClampMin = "5.0", ClampMax = "90.0", Units = "deg"))
+	float OrbitWaypointAngleStep = 45.0f;
+
+	/** Radial tolerance before an Enemy is treated as already aligned with the Wait Ring. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Approach Routing", meta = (ClampMin = "1.0", Units = "cm"))
+	float OrbitRingAcceptanceRadius = 35.0f;
+
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Engagement Slots", meta = (Units = "deg"))
 	float AttackRingAngleOffset = 45.0f;
 
@@ -99,6 +120,8 @@ private:
 	bool TryReserveSlot(AActor* Requester, EBHCombatSlotType SlotType, float MaxDistanceFromOwner = -1.0f, int32 ExcludedSlotIndex = INDEX_NONE);
 	bool FindReservation(const TArray<TWeakObjectPtr<AActor>>& Reservations, AActor* Requester, int32& OutSlotIndex) const;
 	bool GetSlotWorldLocation(EBHCombatSlotType SlotType, int32 SlotIndex, FVector& OutWorldLocation) const;
+	bool DoesSegmentCrossCombatCore(const FVector& SegmentStart, const FVector& SegmentEnd) const;
+	float GetEffectiveCombatCoreRadius() const;
 	bool ProjectToNavigation(const FVector& DesiredLocation, FVector& OutProjectedLocation) const;
 	void UpdateDebugMetrics();
 	void DrawDebugSlots() const;

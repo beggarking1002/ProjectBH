@@ -43,6 +43,12 @@ void ABHCrowdEnemyAIController::OnUnPossess()
 void ABHCrowdEnemyAIController::OnMoveCompleted(FAIRequestID RequestID, const FPathFollowingResult& Result)
 {
 	Super::OnMoveCompleted(RequestID, Result);
+	if (Result.Code == EPathFollowingResult::Success)
+	{
+		bHasRequestedSlotMove = false;
+		ResetStuckTracking();
+		return;
+	}
 
 	if (Result.Code != EPathFollowingResult::Success
 		&& Result.Code != EPathFollowingResult::Aborted
@@ -125,8 +131,24 @@ void ABHCrowdEnemyAIController::RefreshTargetAndMove()
 		return;
 	}
 
+	FVector MoveGoal;
+	if (!CurrentSlotComponent->GetMoveGoalForReservedSlot(
+		GetPawn(),
+		CurrentSlotType,
+		CurrentSlotIndex,
+		SlotLocation,
+		MoveGoal,
+		bIsUsingStagedRoute))
+	{
+		ReleaseCurrentCombatSlot(EBHCombatSlotReleaseReason::ReservationInvalid);
+		StopMovement();
+		DrawDebugStatus(ControlledEnemy);
+		return;
+	}
+
 	const float DistanceToSlotSquared = FVector::DistSquared2D(GetPawn()->GetActorLocation(), SlotLocation);
 	const float DistanceToSlot = FMath::Sqrt(DistanceToSlotSquared);
+	const float DistanceToMoveGoal = FVector::Dist2D(GetPawn()->GetActorLocation(), MoveGoal);
 	LastDistanceToSlot = DistanceToSlot;
 	const bool bAtReservedSlot = DistanceToSlotSquared <= FMath::Square(SlotAcceptanceRadius);
 	if (CurrentSlotType == EBHCombatSlotType::Attack && bAtReservedSlot)
@@ -164,7 +186,7 @@ void ABHCrowdEnemyAIController::RefreshTargetAndMove()
 	}
 
 	if (bHasRequestedSlotMove
-		&& UpdateStuckTracking(DistanceToSlot, ControlledEnemy->GetVelocity().Size2D()))
+		&& UpdateStuckTracking(DistanceToMoveGoal, ControlledEnemy->GetVelocity().Size2D()))
 	{
 		StopMovement();
 		ReleaseCurrentCombatSlot(EBHCombatSlotReleaseReason::Stalled, true);
@@ -173,10 +195,10 @@ void ABHCrowdEnemyAIController::RefreshTargetAndMove()
 	}
 
 	const bool bSlotMoved = !bHasRequestedSlotMove
-		|| FVector::DistSquared2D(LastRequestedSlotLocation, SlotLocation) >= FMath::Square(SlotRepathDistance);
+		|| FVector::DistSquared2D(LastRequestedSlotLocation, MoveGoal) >= FMath::Square(SlotRepathDistance);
 	if (bTargetChanged || bSlotMoved || GetMoveStatus() != EPathFollowingStatus::Moving)
 	{
-		RequestMoveToReservedSlot(SlotLocation);
+		RequestMoveToReservedSlot(MoveGoal);
 	}
 
 	DrawDebugStatus(ControlledEnemy);
@@ -324,6 +346,7 @@ void ABHCrowdEnemyAIController::ReleaseCurrentCombatSlot(
 	CurrentSlotRequester.Reset();
 	LastObservedFormationRevision = INDEX_NONE;
 	bIsReforming = false;
+	bIsUsingStagedRoute = false;
 	LastRequestedSlotLocation = FVector::ZeroVector;
 	bHasRequestedSlotMove = false;
 	TrackedSlotType = EBHCombatSlotType::None;
@@ -410,11 +433,12 @@ void ABHCrowdEnemyAIController::DrawDebugStatus(const ABHEnemy* ControlledEnemy)
 	const FString ReleaseName = StaticEnum<EBHCombatSlotReleaseReason>()->GetNameStringByValue(
 		static_cast<int64>(LastReleaseReason));
 	const FString DebugText = FString::Printf(
-		TEXT("%s | %s[%d] Dist:%.0f Stuck:%.1f Starts:%d | Reform:%s(%d) | Last:%s"),
+		TEXT("%s | %s[%d] Dist:%.0f Route:%s Stuck:%.1f Starts:%d | Reform:%s(%d) | Last:%s"),
 		*CombatStateName,
 		*SlotName,
 		CurrentSlotIndex,
 		LastDistanceToSlot,
+		bIsUsingStagedRoute ? TEXT("Orbit") : TEXT("Direct"),
 		StuckElapsed,
 		ControlledEnemy->GetSuccessfulAttackStartCount(),
 		bIsReforming ? TEXT("Yes") : TEXT("No"),
