@@ -133,6 +133,7 @@ void ABHCrowdEnemyAIController::RefreshTargetAndMove()
 	{
 		StopMovement();
 		bHasRequestedSlotMove = false;
+		bIsReforming = false;
 		ResetStuckTracking();
 
 		const float AttackStartRange = ControlledEnemy->GetAttackStartRange();
@@ -156,6 +157,7 @@ void ABHCrowdEnemyAIController::RefreshTargetAndMove()
 	{
 		StopMovement();
 		bHasRequestedSlotMove = false;
+		bIsReforming = false;
 		ResetStuckTracking();
 		DrawDebugStatus(ControlledEnemy);
 		return;
@@ -228,6 +230,16 @@ bool ABHCrowdEnemyAIController::AcquireCombatSlot(ABHEnemy* ControlledEnemy)
 	{
 		ReleaseCurrentCombatSlot(EBHCombatSlotReleaseReason::TargetChanged);
 		CurrentSlotComponent = TargetSlotComponent;
+		LastObservedFormationRevision = CurrentSlotComponent->GetFormationRevision();
+	}
+	else if (LastObservedFormationRevision != CurrentSlotComponent->GetFormationRevision())
+	{
+		LastObservedFormationRevision = CurrentSlotComponent->GetFormationRevision();
+		++ReformCount;
+		bIsReforming = true;
+		StopMovement();
+		bHasRequestedSlotMove = false;
+		ResetStuckTracking();
 	}
 
 	const float MaximumAttackSlotDistance = FMath::Max(
@@ -310,6 +322,8 @@ void ABHCrowdEnemyAIController::ReleaseCurrentCombatSlot(
 	CurrentSlotType = EBHCombatSlotType::None;
 	CurrentSlotIndex = INDEX_NONE;
 	CurrentSlotRequester.Reset();
+	LastObservedFormationRevision = INDEX_NONE;
+	bIsReforming = false;
 	LastRequestedSlotLocation = FVector::ZeroVector;
 	bHasRequestedSlotMove = false;
 	TrackedSlotType = EBHCombatSlotType::None;
@@ -396,13 +410,15 @@ void ABHCrowdEnemyAIController::DrawDebugStatus(const ABHEnemy* ControlledEnemy)
 	const FString ReleaseName = StaticEnum<EBHCombatSlotReleaseReason>()->GetNameStringByValue(
 		static_cast<int64>(LastReleaseReason));
 	const FString DebugText = FString::Printf(
-		TEXT("%s | %s[%d] Dist:%.0f Stuck:%.1f Starts:%d | Last:%s"),
+		TEXT("%s | %s[%d] Dist:%.0f Stuck:%.1f Starts:%d | Reform:%s(%d) | Last:%s"),
 		*CombatStateName,
 		*SlotName,
 		CurrentSlotIndex,
 		LastDistanceToSlot,
 		StuckElapsed,
 		ControlledEnemy->GetSuccessfulAttackStartCount(),
+		bIsReforming ? TEXT("Yes") : TEXT("No"),
+		ReformCount,
 		*ReleaseName);
 	DrawDebugString(
 		GetWorld(),

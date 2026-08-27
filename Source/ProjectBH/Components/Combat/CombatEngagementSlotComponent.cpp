@@ -5,6 +5,7 @@
 #include "../../AI/BHCrowdEnemyAIController.h"
 #include "../../BHHeroCharacter.h"
 #include "../../Enemies/BHEnemy.h"
+#include "../../ProjectBH.h"
 #include "AI/NavigationSystemBase.h"
 #include "Components/CapsuleComponent.h"
 #include "DrawDebugHelpers.h"
@@ -22,7 +23,7 @@ void UCombatEngagementSlotComponent::BeginPlay()
 	Super::BeginPlay();
 
 	InitializeSlots();
-	SetComponentTickEnabled(bDrawDebugSlots);
+	LastReformOwnerLocation = GetOwner() ? GetOwner()->GetActorLocation() : FVector::ZeroVector;
 }
 
 void UCombatEngagementSlotComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
@@ -37,12 +38,18 @@ void UCombatEngagementSlotComponent::TickComponent(float DeltaTime, ELevelTick T
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
-	if (!bDrawDebugSlots || !GetOwner() || !GetOwner()->HasAuthority())
+	if (!GetOwner() || !GetOwner()->HasAuthority())
 	{
 		return;
 	}
 
 	PruneInvalidReservations();
+	TryReformFormation();
+	if (!bDrawDebugSlots)
+	{
+		return;
+	}
+
 	UpdateDebugMetrics();
 	DrawDebugSlots();
 }
@@ -194,6 +201,107 @@ void UCombatEngagementSlotComponent::PruneInvalidReservations()
 		{
 			Reservation.Reset();
 		}
+	}
+}
+
+void UCombatEngagementSlotComponent::TryReformFormation()
+{
+	const AActor* Owner = GetOwner();
+	if (!Owner || ReformTriggerDistance <= 0.0f)
+	{
+		return;
+	}
+
+	const FVector OwnerLocation = Owner->GetActorLocation();
+	if (FVector::DistSquared2D(LastReformOwnerLocation, OwnerLocation) < FMath::Square(ReformTriggerDistance))
+	{
+		return;
+	}
+
+	LastReformOwnerLocation = OwnerLocation;
+	ReformReservations();
+}
+
+void UCombatEngagementSlotComponent::ReformReservations()
+{
+	ReformRingReservations(AttackReservations, EBHCombatSlotType::Attack);
+	ReformRingReservations(WaitReservations, EBHCombatSlotType::Wait);
+	++FormationRevision;
+
+	UE_LOG(
+		LogProjectBH,
+		Display,
+		TEXT("%s reformed engagement rings. Revision: %d"),
+		GetOwner() ? *GetOwner()->GetName() : TEXT("InvalidSlotOwner"),
+		FormationRevision);
+}
+
+void UCombatEngagementSlotComponent::ReformRingReservations(
+	TArray<TWeakObjectPtr<AActor>>& Reservations,
+	EBHCombatSlotType SlotType)
+{
+	TArray<FVector, TInlineAllocator<16>> SlotLocations;
+	SlotLocations.Reserve(Reservations.Num());
+	for (int32 SlotIndex = 0; SlotIndex < Reservations.Num(); ++SlotIndex)
+	{
+		FVector SlotLocation;
+		if (!GetSlotWorldLocation(SlotType, SlotIndex, SlotLocation))
+		{
+			return;
+		}
+		SlotLocations.Add(SlotLocation);
+	}
+
+	TArray<TWeakObjectPtr<AActor>, TInlineAllocator<16>> Requesters;
+	TArray<int32, TInlineAllocator<16>> AvailableSlotIndices;
+	for (int32 SlotIndex = 0; SlotIndex < Reservations.Num(); ++SlotIndex)
+	{
+		if (Reservations[SlotIndex].IsValid())
+		{
+			Requesters.Add(Reservations[SlotIndex]);
+		}
+		Reservations[SlotIndex].Reset();
+		AvailableSlotIndices.Add(SlotIndex);
+	}
+
+	// Preserve Attack/Wait roles, then minimize conspicuous cross-ring travel by
+	// repeatedly selecting the closest remaining actor-slot pair.
+	while (!Requesters.IsEmpty() && !AvailableSlotIndices.IsEmpty())
+	{
+		int32 BestRequesterArrayIndex = INDEX_NONE;
+		int32 BestSlotArrayIndex = INDEX_NONE;
+		float BestDistanceSquared = TNumericLimits<float>::Max();
+
+		for (int32 RequesterArrayIndex = 0; RequesterArrayIndex < Requesters.Num(); ++RequesterArrayIndex)
+		{
+			const AActor* Requester = Requesters[RequesterArrayIndex].Get();
+			if (!Requester)
+			{
+				continue;
+			}
+
+			for (int32 SlotArrayIndex = 0; SlotArrayIndex < AvailableSlotIndices.Num(); ++SlotArrayIndex)
+			{
+				const FVector& SlotLocation = SlotLocations[AvailableSlotIndices[SlotArrayIndex]];
+				const float DistanceSquared = FVector::DistSquared2D(Requester->GetActorLocation(), SlotLocation);
+				if (DistanceSquared < BestDistanceSquared)
+				{
+					BestDistanceSquared = DistanceSquared;
+					BestRequesterArrayIndex = RequesterArrayIndex;
+					BestSlotArrayIndex = SlotArrayIndex;
+				}
+			}
+		}
+
+		if (BestRequesterArrayIndex == INDEX_NONE || BestSlotArrayIndex == INDEX_NONE)
+		{
+			break;
+		}
+
+		const int32 ReservedSlotIndex = AvailableSlotIndices[BestSlotArrayIndex];
+		Reservations[ReservedSlotIndex] = Requesters[BestRequesterArrayIndex];
+		Requesters.RemoveAtSwap(BestRequesterArrayIndex, 1, EAllowShrinking::No);
+		AvailableSlotIndices.RemoveAtSwap(BestSlotArrayIndex, 1, EAllowShrinking::No);
 	}
 }
 
@@ -439,11 +547,12 @@ void UCombatEngagementSlotComponent::DrawDebugSlots() const
 	}
 
 	const FString DebugText = FString::Printf(
-		TEXT("Slots A:%d/%d W:%d/%d | Attacking:%d WaitAttack:%d | Spacing:%d Peak:%d"),
+		TEXT("Slots A:%d/%d W:%d/%d | Reform:%d | Attacking:%d WaitAttack:%d | Spacing:%d Peak:%d"),
 		OccupiedAttackSlots,
 		AttackReservations.Num(),
 		OccupiedWaitSlots,
 		WaitReservations.Num(),
+		FormationRevision,
 		CurrentAttackingEnemyCount,
 		CurrentWaitAttackerCount,
 		CurrentSpacingViolationCount,

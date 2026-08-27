@@ -114,6 +114,9 @@ private:
 	float ExcludedSlotUntil = 0.0f;
 	float SlotRequestBlockedUntil = 0.0f;
 	EBHCombatSlotReleaseReason LastReleaseReason = EBHCombatSlotReleaseReason::None;
+	int32 LastObservedFormationRevision = INDEX_NONE;
+	int32 ReformCount = 0;
+	bool bIsReforming = false;
 
 	FTimerHandle TargetRefreshTimerHandle;
 };

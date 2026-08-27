@@ -44,10 +44,6 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Movement", meta = (ClampMin = "0.0", Units = "cm/s"))
 	float MaxWalkSpeed = 300.0f;
 
-	/** Prevents the enemy that just finished attacking from immediately taking the slot back. */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Engagement", meta = (ClampMin = "0.0", Units = "s"))
-	float AttackSlotReentryDelay = 1.0f;
-
 	/** Extra time allowed after the expected montage duration before forcing recovery. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat", meta = (ClampMin = "0.0", Units = "s"))
 	float AttackMontageFailSafeGrace = 0.5f;

@@ -56,6 +56,10 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Debug|Engagement Slots")
 	int32 GetPeakSpacingViolationCount() const { return PeakSpacingViolationCount; }
 
+	/** Increments whenever a large owner displacement triggers a coordinated ring reform. */
+	UFUNCTION(BlueprintPure, Category = "Combat|Engagement Slots")
+	int32 GetFormationRevision() const { return FormationRevision; }
+
 protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Engagement Slots", meta = (ClampMin = "1", UIMin = "1"))
 	int32 AttackSlotCount = 4;
@@ -79,12 +83,19 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Engagement Slots")
 	FVector NavProjectionExtent = FVector(50.0f, 50.0f, 200.0f);
 
+	/** Reassigns occupied slots within each ring after the owner moves this far from the last reform anchor. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Engagement Slots", meta = (ClampMin = "0.0", Units = "cm"))
+	float ReformTriggerDistance = 500.0f;
+
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Debug|Engagement Slots")
 	bool bDrawDebugSlots = true;
 
 private:
 	void InitializeSlots();
 	void PruneInvalidReservations();
+	void TryReformFormation();
+	void ReformReservations();
+	void ReformRingReservations(TArray<TWeakObjectPtr<AActor>>& Reservations, EBHCombatSlotType SlotType);
 	bool TryReserveSlot(AActor* Requester, EBHCombatSlotType SlotType, float MaxDistanceFromOwner = -1.0f, int32 ExcludedSlotIndex = INDEX_NONE);
 	bool FindReservation(const TArray<TWeakObjectPtr<AActor>>& Reservations, AActor* Requester, int32& OutSlotIndex) const;
 	bool GetSlotWorldLocation(EBHCombatSlotType SlotType, int32 SlotIndex, FVector& OutWorldLocation) const;
@@ -94,6 +105,8 @@ private:
 
 	TArray<TWeakObjectPtr<AActor>> AttackReservations;
 	TArray<TWeakObjectPtr<AActor>> WaitReservations;
+	FVector LastReformOwnerLocation = FVector::ZeroVector;
+	int32 FormationRevision = 0;
 	int32 CurrentSpacingViolationCount = 0;
 	int32 PeakSpacingViolationCount = 0;
 	int32 CurrentAttackingEnemyCount = 0;

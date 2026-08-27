@@ -12,7 +12,7 @@ Combat Engagement Slot 위에서 Detour Crowd가 4~12마리의 접근을 안정�
 - 기본 반경은 Attack 125 cm, Wait 300 cm이고 AI 갱신 주기는 0.5초다.
 - 경로 탐색 실패, 타깃 소실, UnPossess, Actor 파괴 시 슬롯을 정리한다.
 - 이동 요청 후 정체를 감지하는 2초 watchdog과 실패 슬롯 2초 제외를 구현했다.
-- 공격 회복 종료 시 슬롯을 반납하고 1초 동안 재진입을 막아 Wait 적에게 승격 기회를 준다.
+- 정상적인 공격·회복 후에는 Attack Slot을 유지한다. 사망·경직·교착 또는 큰 이동에 따른 Reform에서만 전열 구성이 바뀐다.
 - Enemy의 `Staggered`, `Dead` 상태와 즉시 슬롯 반납을 구현했다.
 - 피격·사망 Montage는 선택 사항이며, 지정하지 않아도 AnimBP가 상태 값을 읽어 표현할 수 있다.
 
@@ -26,11 +26,12 @@ Combat Engagement Slot 위에서 Detour Crowd가 4~12마리의 접근을 안정�
 - 플레이어와 Enemy 위에 슬롯, 거리, 정체 시간, 마지막 반납 사유를 디버그 문자열로 표시한다.
 - 플레이어 위 집계에는 Attack/Wait 점유 수, 실제 공격 상태 수, Wait 공격 위반 수, Capsule 간격 위반 수를 표시한다.
 
-### 공격자 교대
+### 공격 슬롯 지속 점유와 Reform
 
 - 공격과 회복 중에는 Attack Slot을 유지한다.
-- 회복이 끝나면 슬롯을 반납하고 `AttackSlotReentryDelay` 동안 새 슬롯 요청을 막는다.
-- 기본 재진입 대기시간은 1초이며 `DA_Enemy_Config`에서 조절한다.
+- 회복이 끝나도 슬롯을 반납하지 않고 같은 자리에서 다음 공격을 준비한다.
+- 플레이어가 마지막 Reform 기준점에서 500 cm 이상 이동하면 Attack/Wait Ring 내부 예약을 현재 위치 기준으로 재배치한다.
+- Reform은 Attack과 Wait 역할을 서로 교환하지 않으며, 경로 실패와 2초 watchdog은 기존처럼 개별 슬롯을 반납한다.
 
 ### 피격과 사망
 
@@ -52,7 +53,6 @@ Combat Engagement Slot 위에서 Detour Crowd가 4~12마리의 접근을 안정�
 | `DeathMontage` | None | 선택적 사망 Montage |
 | `DeathCollisionDisableDelay` | 0.2초 | 시체 Capsule 비활성화 시점 |
 | `DeadActorLifeSpan` | 5초 | 시체 제거 시점, 0이면 유지 |
-| `AttackSlotReentryDelay` | 1초 | 공격 종료 후 슬롯 재진입 대기 |
 | `AttackMontageFailSafeGrace` | 0.5초 | 예상 공격 Montage 길이 이후 강제 회복까지의 여유 |
 
 Montage를 사용하면 AnimGraph에 Montage가 사용하는 Slot 노드가 있어야 한다. Death Montage가 끝난 뒤 마지막 자세를 유지하려면 Montage의 자동 블렌드 아웃을 끄거나 `bIsDead` 기반 Dead 상태를 함께 구성한다.
@@ -138,7 +138,7 @@ AI가 슬롯으로 이동 중인데 목적지까지 거리가 의미 있게 줄�
 
 1. 최소 진단 정보와 슬롯 반납 사유 구현 완료
 2. 2초 정체 watchdog과 실패 슬롯 재선택 구현 완료
-3. 공격 회복 종료 후 슬롯 교대 구현 완료
+3. 공격 회복 후 슬롯 지속 점유와 500 cm 이동 Reform 구현 완료
 4. Enemy 사망·경직 상태와 AI 슬롯 반납 구현 완료
 5. Unreal 5.7 Editor Development 빌드 성공
 

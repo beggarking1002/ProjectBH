@@ -342,15 +342,6 @@ void ABHEnemy::FinishAttackRecovery()
 
 	ClearAttackContext();
 	SetCombatState(EBHEnemyCombatState::Chasing);
-	if (ABHCrowdEnemyAIController* CrowdController = Cast<ABHCrowdEnemyAIController>(GetController()))
-	{
-		const float ReentryDelay = EnemyConfigDataAsset
-			? EnemyConfigDataAsset->AttackSlotReentryDelay
-			: 1.0f;
-		CrowdController->ReleaseCombatSlot(
-			EBHCombatSlotReleaseReason::AttackRecoveryComplete,
-			ReentryDelay);
-	}
 }
 
 void ABHEnemy::FinishStagger()
