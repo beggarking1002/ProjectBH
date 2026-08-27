@@ -25,6 +25,10 @@ struct PROJECTBH_API FBHEnemyAttackConfig
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly)
 	TObjectPtr<UAnimMontage> Montage;
 
+	/** Optional sections randomly selected by the authority for this attack. Empty plays the montage from its beginning. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly)
+	TArray<FName> MontageSections;
+
 	/** Instant effect whose damage magnitude is supplied with Data.Damage. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly)
 	TSubclassOf<UGameplayEffect> DamageEffect;

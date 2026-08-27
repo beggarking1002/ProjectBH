@@ -95,6 +95,14 @@ bool ABHEnemy::TryStartBasicAttack(AActor* TargetActor)
 	AttackTarget = TargetActor;
 	ActiveAttackId = AttackConfig->AttackId;
 	ActiveAttackMontage = AttackConfig->Montage;
+	ActiveAttackMontageSection = SelectRandomMontageSection(*AttackConfig);
+	UE_LOG(
+		LogProjectBH,
+		Display,
+		TEXT("%s selected montage section '%s' for attack '%s'."),
+		*GetName(),
+		*ActiveAttackMontageSection.ToString(),
+		*ActiveAttackId.ToString());
 	bHasAppliedDamageThisAttack = false;
 	SetCombatState(EBHEnemyCombatState::Attacking);
 
@@ -109,14 +117,15 @@ bool ABHEnemy::TryStartBasicAttack(AActor* TargetActor)
 		}
 	}
 
-	MulticastPlayBasicAttack(ActiveAttackMontage);
+	MulticastPlayBasicAttack(ActiveAttackMontage, ActiveAttackMontageSection);
 	return true;
 }
 
-void ABHEnemy::MulticastPlayBasicAttack_Implementation(UAnimMontage* AttackMontage)
+void ABHEnemy::MulticastPlayBasicAttack_Implementation(UAnimMontage* AttackMontage, FName MontageSection)
 {
 	ActiveAttackMontage = AttackMontage;
-	const float MontageDuration = PlayAnimMontage(ActiveAttackMontage);
+	ActiveAttackMontageSection = MontageSection;
+	const float MontageDuration = PlayAnimMontage(ActiveAttackMontage, 1.0f, ActiveAttackMontageSection);
 	if (!HasAuthority())
 	{
 		return;
@@ -226,6 +235,7 @@ void ABHEnemy::FinishAttackRecovery()
 	AttackTarget = nullptr;
 	ActiveAttackMontage = nullptr;
 	ActiveAttackId = NAME_None;
+	ActiveAttackMontageSection = NAME_None;
 	bHasAppliedDamageThisAttack = false;
 	SetCombatState(EBHEnemyCombatState::Chasing);
 }
@@ -294,6 +304,31 @@ const FBHAttackDefinitionRow* ABHEnemy::GetActiveAttackDefinition() const
 {
 	const FBHEnemyAttackConfig* AttackConfig = GetAttackConfig(ActiveAttackId);
 	return AttackConfig ? GetAttackDefinition(*AttackConfig) : nullptr;
+}
+
+FName ABHEnemy::SelectRandomMontageSection(const FBHEnemyAttackConfig& AttackConfig) const
+{
+	if (!AttackConfig.Montage || AttackConfig.MontageSections.IsEmpty())
+	{
+		return NAME_None;
+	}
+
+	TArray<FName, TInlineAllocator<8>> ValidSections;
+	for (const FName SectionName : AttackConfig.MontageSections)
+	{
+		if (!SectionName.IsNone() && AttackConfig.Montage->IsValidSectionName(SectionName))
+		{
+			ValidSections.Add(SectionName);
+		}
+		else
+		{
+			UE_LOG(LogProjectBH, Warning, TEXT("%s ignored invalid montage section '%s' in attack '%s'."), *GetName(), *SectionName.ToString(), *AttackConfig.AttackId.ToString());
+		}
+	}
+
+	return ValidSections.IsEmpty()
+		? NAME_None
+		: ValidSections[FMath::RandHelper(ValidSections.Num())];
 }
 
 void ABHEnemy::SetCombatState(EBHEnemyCombatState NewState)

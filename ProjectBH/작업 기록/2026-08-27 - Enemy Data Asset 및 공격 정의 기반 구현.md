@@ -181,3 +181,63 @@ Locomotion State Machine
 ```
 
 현재 공격은 전신 공격이므로 우선 Slot 노드를 바로 연결한다. 이동과 상체 공격을 동시에 표현할 필요가 생기면 이후 `Layered Blend Per Bone`과 `UpperBodySlot` 구조로 확장한다.
+
+## 기본 공격 애니메이션 무작위 선택
+
+### 요청 이해
+
+하나의 Guardian 공격 Montage에 배치된 두 공격 애니메이션을 별도 Section으로 구분하고, 공격을 시작할 때마다 서버가 Section 하나를 무작위로 선택해 모든 클라이언트가 같은 공격을 보게 한다.
+
+### 구성 원칙
+
+- 공격 정의 행과 피해 수치는 두 애니메이션이 공유한다.
+- `DA_Enemy_Guardian`의 기본 공격 항목에 선택 가능한 Montage Section 이름을 배열로 둔다.
+- 무작위 선택은 서버에서 한 번만 수행하고, 선택된 Section 이름을 Multicast로 전달한다.
+- 배열이 비어 있으면 기존처럼 Montage 처음부터 재생한다.
+- 진짜 무작위 선택이므로 같은 Section이 연속으로 나올 수 있다.
+
+### 구현 결과
+
+- `FBHEnemyAttackConfig`에 `MontageSections` 배열을 추가했다.
+- 서버가 유효한 Section만 모아 하나를 무작위로 선택한다.
+- 선택된 Montage와 Section 이름을 Multicast RPC로 전달하므로 서버와 모든 클라이언트가 같은 공격 애니메이션을 재생한다.
+- 공격을 시작할 때 서버가 선택한 Section 이름을 Output Log에 남긴다.
+- 잘못된 Section 이름은 Output Log에 경고를 남기고 선택 대상에서 제외한다.
+- UHT 및 `ProjectBHEditor Win64 Development` 빌드에 성공했다.
+
+### 사용자가 에디터에서 할 일
+
+새 배열 필드가 보이도록 Unreal Editor를 완전히 종료한 뒤 다시 연다.
+
+1. `/Game/Enemy/AM_Guardian_Attack`을 연다.
+2. 첫 번째 애니메이션이 0초에서 시작한다면 기존 `Default` Section 헤더를 선택하고 Details의 Section Name을 `Attack_01`로 바꾼다. 같은 위치에 Section을 겹쳐 만들지 않는다.
+3. 두 번째 애니메이션 시작점의 상단 Montage 트랙을 우클릭하고 `Create New Section`을 선택해 `Attack_02`를 만든다.
+4. Montage Sections 패널이 보이지 않으면 상단 `Window` 메뉴에서 연다. 패널의 `Clear`를 눌러 Section 연결을 모두 해제한다. 결과적으로 `Attack_01`, `Attack_02`의 Next Section은 모두 `None`이어야 한다. 두 Section을 서로 연결하면 한 번의 공격에 두 애니메이션이 연속 재생된다.
+5. 각 Section의 실제 타격 프레임에 `BH Enemy Attack Hit` Notify를 하나씩 배치한다.
+6. `DA_Enemy_Guardian`을 열고 기본 공격 항목의 `Montage Sections` 배열에 원소 두 개를 추가한다.
+7. 배열에 `Attack_01`, `Attack_02`를 정확히 입력하고 저장한다.
+
+```text
+Attacks[0]
+  AttackId: Guardian.Basic.01
+  Montage: AM_Guardian_Attack
+  MontageSections[0]: Attack_01
+  MontageSections[1]: Attack_02
+```
+
+PIE에서 여러 차례 공격을 지켜보고, Output Log의 `selected montage section` 기록이 실제 재생된 동작과 일치하는지 확인한다. 같은 Section이 연속으로 나오는 것은 정상적인 무작위 결과다.
+
+### `Attack_01`만 연속 선택된 현상 진단
+
+- 런타임 로그에서 여섯 번의 선택이 모두 `Attack_01`로 확인됐다.
+- 저장된 `DA_Enemy_Guardian`을 Unreal API로 직접 읽어 `MontageSections = [Attack_01, Attack_02]`이며 두 원소가 모두 정상 저장된 것을 확인했다.
+- 잘못된 Section 경고도 없으므로 에셋 연결 오류가 아니다.
+- 현재 코드는 매 공격마다 독립적인 순수 무작위 선택을 한다. 두 후보 중 같은 후보가 여섯 번 연속 나올 확률은 `1/64`, 약 `1.56%`이므로 가능한 결과다.
+- 플레이 체감상 두 동작이 고르게 보여야 한다면 순수 무작위 대신 Section 두 개를 섞어 모두 소진한 뒤 다시 섞는 Shuffle Bag 방식으로 변경하는 것이 적합하다.
+
+### 무작위 선택 정책 확정
+
+- 추가 플레이 검증에서 `Attack_02`도 정상적으로 선택되는 것을 확인했다.
+- 에셋 설정과 현재 선택 로직에는 문제가 없으므로 코드를 변경하지 않는다.
+- 기본 공격은 각 시도마다 독립적으로 Section을 선택하는 순수 무작위 방식을 유지한다.
+- 따라서 같은 공격이 여러 번 연속으로 나오는 결과도 정상 동작으로 취급한다.

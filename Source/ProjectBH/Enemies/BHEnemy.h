@@ -68,7 +68,7 @@ protected:
 
 private:
 	UFUNCTION(NetMulticast, Reliable)
-	void MulticastPlayBasicAttack(UAnimMontage* AttackMontage);
+	void MulticastPlayBasicAttack(UAnimMontage* AttackMontage, FName MontageSection);
 
 	void HandleAttackMontageEnded(UAnimMontage* Montage, bool bInterrupted);
 	void BeginAttackRecovery();
@@ -78,6 +78,7 @@ private:
 	const FBHEnemyAttackConfig* GetDefaultAttackConfig() const;
 	const FBHAttackDefinitionRow* GetAttackDefinition(const FBHEnemyAttackConfig& AttackConfig) const;
 	const FBHAttackDefinitionRow* GetActiveAttackDefinition() const;
+	FName SelectRandomMontageSection(const FBHEnemyAttackConfig& AttackConfig) const;
 	void SetCombatState(EBHEnemyCombatState NewState);
 
 	UPROPERTY(Replicated, VisibleInstanceOnly, BlueprintReadOnly, Category = "Combat|Enemy", meta = (AllowPrivateAccess = "true"))
@@ -91,6 +92,7 @@ private:
 	TObjectPtr<UAnimMontage> ActiveAttackMontage;
 
 	FName ActiveAttackId = NAME_None;
+	FName ActiveAttackMontageSection = NAME_None;
 
 	FTimerHandle AttackRecoveryTimerHandle;
 	bool bLoggedInvalidAttackConfig = false;
