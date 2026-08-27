@@ -3,6 +3,7 @@
 #include "BHCrowdEnemyAIController.h"
 
 #include "../BHHeroCharacter.h"
+#include "../Enemies/BHEnemy.h"
 #include "../ProjectBH.h"
 #include "EngineUtils.h"
 #include "Navigation/PathFollowingComponent.h"
@@ -38,8 +39,15 @@ void ABHCrowdEnemyAIController::OnUnPossess()
 
 void ABHCrowdEnemyAIController::RefreshTargetAndMove()
 {
-	if (!HasAuthority() || !GetPawn())
+	ABHEnemy* ControlledEnemy = Cast<ABHEnemy>(GetPawn());
+	if (!HasAuthority() || !ControlledEnemy)
 	{
+		return;
+	}
+
+	if (ControlledEnemy->IsAttackLocked())
+	{
+		StopMovement();
 		return;
 	}
 
@@ -59,16 +67,18 @@ void ABHCrowdEnemyAIController::RefreshTargetAndMove()
 
 	SetFocus(CurrentTarget, EAIFocusPriority::Gameplay);
 
+	const float AttackStartRange = ControlledEnemy->GetAttackStartRange();
 	const float DistanceSquared2D = FVector::DistSquared2D(GetPawn()->GetActorLocation(), CurrentTarget->GetActorLocation());
-	if (DistanceSquared2D <= FMath::Square(AcceptanceRadius))
+	if (DistanceSquared2D <= FMath::Square(AttackStartRange))
 	{
 		StopMovement();
+		ControlledEnemy->TryStartBasicAttack(CurrentTarget);
 		return;
 	}
 
 	if (bTargetChanged || GetMoveStatus() != EPathFollowingStatus::Moving)
 	{
-		RequestMoveToCurrentTarget();
+		RequestMoveToCurrentTarget(AttackStartRange);
 	}
 }
 
@@ -102,7 +112,7 @@ ABHHeroCharacter* ABHCrowdEnemyAIController::FindClosestPlayerHero() const
 	return ClosestHero;
 }
 
-void ABHCrowdEnemyAIController::RequestMoveToCurrentTarget()
+void ABHCrowdEnemyAIController::RequestMoveToCurrentTarget(float AcceptanceRadius)
 {
 	if (!IsValid(CurrentTarget))
 	{

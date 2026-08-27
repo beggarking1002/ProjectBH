@@ -28,10 +28,6 @@ public:
 	ABHHeroCharacter* GetCurrentTarget() const { return CurrentTarget; }
 
 protected:
-	/** How close the enemy should get before considering the pursuit complete. */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI|Pursuit", meta = (ClampMin = "0.0", Units = "cm"))
-	float AcceptanceRadius = 150.0f;
-
 	/** Target validation and stalled-move retry interval. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI|Pursuit", meta = (ClampMin = "0.1", Units = "s"))
 	float TargetRefreshInterval = 0.5f;
@@ -39,7 +35,7 @@ protected:
 private:
 	void RefreshTargetAndMove();
 	ABHHeroCharacter* FindClosestPlayerHero() const;
-	void RequestMoveToCurrentTarget();
+	void RequestMoveToCurrentTarget(float AcceptanceRadius);
 
 	UPROPERTY(Transient)
 	TObjectPtr<ABHHeroCharacter> CurrentTarget;
