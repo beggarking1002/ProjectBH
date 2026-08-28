@@ -8,6 +8,7 @@
 
 class UAnimMontage;
 class UDataAsset_EnemyConfig;
+class ABHEnemyPoolManager;
 struct FOnAttributeChangeData;
 struct FBHAttackDefinitionRow;
 struct FBHEnemyAttackConfig;
@@ -62,6 +63,24 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Debug|Enemy")
 	int32 GetSuccessfulAttackStartCount() const { return SuccessfulAttackStartCount; }
 
+	UFUNCTION(BlueprintPure, Category = "Enemy Pool")
+	bool IsPoolActive() const { return bIsPoolInWorld && !IsDead(); }
+
+	UFUNCTION(BlueprintPure, Category = "Enemy Pool")
+	bool IsPoolInWorld() const { return bIsPoolInWorld; }
+
+	UFUNCTION(BlueprintPure, Category = "Enemy Pool")
+	bool IsPoolManaged() const;
+
+	/** Configures a deferred-spawned enemy as hidden pool reserve before BeginPlay. */
+	void InitializeForPool(ABHEnemyPoolManager* InPoolManager);
+
+	/** Resets one complete enemy life and spawns a fresh AI controller. Authority only. */
+	bool ActivateFromPool(const FTransform& SpawnTransform);
+
+	/** Removes AI/presentation and parks this actor as hidden reusable reserve. Authority only. */
+	void DeactivateToPoolStorage(const FTransform& StorageTransform);
+
 	/** Server-authoritative reaction entry point. A negative duration uses EnemyConfigDataAsset. */
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Combat|Enemy")
 	void StartStagger(float Duration = -1.0f);
@@ -80,11 +99,20 @@ protected:
 	float AnimationPreviewWalkSpeed = 150.0f;
 
 private:
+	UFUNCTION()
+	void OnRep_PoolInWorld();
+
 	UFUNCTION(NetMulticast, Reliable)
 	void MulticastPlayBasicAttack(UAnimMontage* AttackMontage, FName MontageSection);
 
 	UFUNCTION(NetMulticast, Reliable)
 	void MulticastPlayReaction(UAnimMontage* ReactionMontage);
+
+	UFUNCTION(NetMulticast, Reliable)
+	void MulticastSetPoolPresentationActive(bool bActive);
+
+	UFUNCTION(NetMulticast, Reliable)
+	void MulticastSetDeathCollisionEnabled(bool bEnabled);
 
 	void HandleHealthChanged(const FOnAttributeChangeData& ChangeData);
 	void HandleAttackMontageEnded(UAnimMontage* Montage, bool bInterrupted);
@@ -94,6 +122,9 @@ private:
 	void FinishStagger();
 	void Die();
 	void DisableDeathCollision();
+	void ApplyPoolPresentationState(bool bActive);
+	void DestroyCurrentAIController();
+	void ResetGameplayStateForPoolActivation();
 	void ClearAttackContext();
 	bool IsAttackTargetInHitArea() const;
 	const FBHEnemyAttackConfig* GetAttackConfig(FName AttackId) const;
@@ -105,6 +136,13 @@ private:
 
 	UPROPERTY(Replicated, VisibleInstanceOnly, BlueprintReadOnly, Category = "Combat|Enemy", meta = (AllowPrivateAccess = "true"))
 	EBHEnemyCombatState CombatState = EBHEnemyCombatState::Chasing;
+
+	/** True for living enemies and visible corpses; false only while hidden in free storage. */
+	UPROPERTY(ReplicatedUsing = OnRep_PoolInWorld, VisibleInstanceOnly, BlueprintReadOnly, Category = "Enemy Pool", meta = (AllowPrivateAccess = "true"))
+	bool bIsPoolInWorld = true;
+
+	UPROPERTY(Replicated, Transient)
+	TObjectPtr<ABHEnemyPoolManager> PoolManager;
 
 	/** Frozen for one attack so a target switch cannot redirect a hit already in progress. */
 	UPROPERTY(Transient)

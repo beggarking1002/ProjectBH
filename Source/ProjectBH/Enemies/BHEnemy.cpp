@@ -2,6 +2,7 @@
 
 #include "BHEnemy.h"
 
+#include "BHEnemyPoolManager.h"
 #include "../AI/BHCrowdEnemyAIController.h"
 #include "../AbilitySystem/BHAbilitySystemComponent.h"
 #include "../AbilitySystem/BHAttributeSet.h"
@@ -17,6 +18,7 @@
 #include "GameFramework/Controller.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameplayEffect.h"
+#include "GameplayEffectTypes.h"
 #include "Net/UnrealNetwork.h"
 #include "TimerManager.h"
 
@@ -52,6 +54,12 @@ void ABHEnemy::BeginPlay()
 			Die();
 		}
 	}
+
+	if (HasAuthority() && IsPoolManaged() && !bIsPoolInWorld)
+	{
+		ApplyPoolPresentationState(false);
+		DestroyCurrentAIController();
+	}
 }
 
 void ABHEnemy::Tick(float DeltaSeconds)
@@ -72,6 +80,85 @@ void ABHEnemy::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetime
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 
 	DOREPLIFETIME(ABHEnemy, CombatState);
+	DOREPLIFETIME(ABHEnemy, bIsPoolInWorld);
+	DOREPLIFETIME(ABHEnemy, PoolManager);
+}
+
+bool ABHEnemy::IsPoolManaged() const
+{
+	return IsValid(PoolManager.Get());
+}
+
+void ABHEnemy::InitializeForPool(ABHEnemyPoolManager* InPoolManager)
+{
+	if (!HasAuthority() || !IsValid(InPoolManager))
+	{
+		return;
+	}
+
+	PoolManager = InPoolManager;
+	bIsPoolInWorld = false;
+	AutoPossessAI = EAutoPossessAI::Disabled;
+	SetLifeSpan(0.0f);
+}
+
+bool ABHEnemy::ActivateFromPool(const FTransform& SpawnTransform)
+{
+	if (!HasAuthority() || !IsPoolManaged())
+	{
+		return false;
+	}
+
+	GetWorldTimerManager().ClearAllTimersForObject(this);
+	SetLifeSpan(0.0f);
+	SetActorTransform(SpawnTransform, false, nullptr, ETeleportType::TeleportPhysics);
+	ResetGameplayStateForPoolActivation();
+	SetCombatState(EBHEnemyCombatState::Chasing);
+	bIsPoolInWorld = true;
+	ApplyPoolPresentationState(true);
+	MulticastSetPoolPresentationActive(true);
+	MulticastSetDeathCollisionEnabled(true);
+
+	GetCharacterMovement()->SetMovementMode(MOVE_Walking);
+	GetCharacterMovement()->MaxWalkSpeed = EnemyConfigDataAsset
+		? EnemyConfigDataAsset->MaxWalkSpeed
+		: 300.0f;
+	SpawnDefaultController();
+	if (!Controller)
+	{
+		UE_LOG(LogProjectBH, Error, TEXT("%s pool activation failed to spawn its AI Controller."), *GetName());
+		DeactivateToPoolStorage(GetActorTransform());
+		return false;
+	}
+
+	ForceNetUpdate();
+	return true;
+}
+
+void ABHEnemy::DeactivateToPoolStorage(const FTransform& StorageTransform)
+{
+	if (!HasAuthority() || !IsPoolManaged())
+	{
+		return;
+	}
+
+	GetWorldTimerManager().ClearAllTimersForObject(this);
+	ClearAttackContext();
+	SetLifeSpan(0.0f);
+	DestroyCurrentAIController();
+	GetCharacterMovement()->StopMovementImmediately();
+	GetCharacterMovement()->DisableMovement();
+	SetCombatState(EBHEnemyCombatState::Dead);
+	bIsPoolInWorld = false;
+	SetActorTransform(StorageTransform, false, nullptr, ETeleportType::TeleportPhysics);
+	ApplyPoolPresentationState(false);
+	MulticastSetPoolPresentationActive(false);
+	ForceNetUpdate();
+}
+
+void ABHEnemy::OnRep_PoolInWorld()
+{
+	ApplyPoolPresentationState(bIsPoolInWorld);
 }
 
 bool ABHEnemy::TryStartBasicAttack(AActor* TargetActor)
@@ -175,6 +262,24 @@ void ABHEnemy::MulticastPlayReaction_Implementation(UAnimMontage* ReactionMontag
 	if (ReactionMontage)
 	{
 		PlayAnimMontage(ReactionMontage);
+	}
+}
+
+void ABHEnemy::MulticastSetPoolPresentationActive_Implementation(bool bActive)
+{
+	if (bActive)
+	{
+		StopAnimMontage();
+	}
+	ApplyPoolPresentationState(bActive);
+}
+
+void ABHEnemy::MulticastSetDeathCollisionEnabled_Implementation(bool bEnabled)
+{
+	if (GetCapsuleComponent())
+	{
+		GetCapsuleComponent()->SetCollisionEnabled(
+			bEnabled ? ECollisionEnabled::QueryAndPhysics : ECollisionEnabled::NoCollision);
 	}
 }
 
@@ -395,6 +500,14 @@ void ABHEnemy::Die()
 			false);
 	}
 
+	if (IsPoolManaged())
+	{
+		SetLifeSpan(0.0f);
+		DestroyCurrentAIController();
+		PoolManager->NotifyEnemyDied(this);
+		return;
+	}
+
 	const float DeadActorLifeSpan = EnemyConfigDataAsset
 		? EnemyConfigDataAsset->DeadActorLifeSpan
 		: 5.0f;
@@ -402,16 +515,68 @@ void ABHEnemy::Die()
 	{
 		SetLifeSpan(DeadActorLifeSpan);
 	}
-
 	DetachFromControllerPendingDestroy();
 }
 
 void ABHEnemy::DisableDeathCollision()
 {
+	MulticastSetDeathCollisionEnabled(false);
+}
+
+void ABHEnemy::ApplyPoolPresentationState(bool bActive)
+{
+	SetActorHiddenInGame(!bActive);
+	SetActorEnableCollision(bActive);
+	SetActorTickEnabled(bActive);
+	if (GetMesh())
+	{
+		GetMesh()->SetComponentTickEnabled(bActive);
+	}
 	if (GetCapsuleComponent())
 	{
-		GetCapsuleComponent()->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		GetCapsuleComponent()->SetCollisionEnabled(
+			bActive ? ECollisionEnabled::QueryAndPhysics : ECollisionEnabled::NoCollision);
 	}
+}
+
+void ABHEnemy::DestroyCurrentAIController()
+{
+	AController* ExistingController = GetController();
+	if (!ExistingController)
+	{
+		return;
+	}
+
+	if (ABHCrowdEnemyAIController* CrowdController = Cast<ABHCrowdEnemyAIController>(ExistingController))
+	{
+		CrowdController->ReleaseCombatSlot(EBHCombatSlotReleaseReason::UnPossessed);
+		CrowdController->StopMovement();
+	}
+	ExistingController->UnPossess();
+	ExistingController->Destroy();
+}
+
+void ABHEnemy::ResetGameplayStateForPoolActivation()
+{
+	ClearAttackContext();
+	bLoggedInvalidAttackConfig = false;
+	bHasAppliedDamageThisAttack = false;
+	SuccessfulAttackStartCount = 0;
+
+	UBHAbilitySystemComponent* AbilitySystem = GetBHAbilitySystemComponent();
+	if (!AbilitySystem)
+	{
+		return;
+	}
+
+	AbilitySystem->RemoveActiveEffects(FGameplayEffectQuery());
+	float MaxHealth = AbilitySystem->GetNumericAttribute(UBHAttributeSet::GetMaxHealthAttribute());
+	if (MaxHealth <= 0.0f)
+	{
+		MaxHealth = 100.0f;
+		AbilitySystem->SetNumericAttributeBase(UBHAttributeSet::GetMaxHealthAttribute(), MaxHealth);
+	}
+	AbilitySystem->SetNumericAttributeBase(UBHAttributeSet::GetHealthAttribute(), MaxHealth);
 }
 
 void ABHEnemy::ClearAttackContext()
