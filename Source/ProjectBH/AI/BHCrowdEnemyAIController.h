@@ -29,6 +29,15 @@ enum class EBHCombatSlotReleaseReason : uint8
 	Died
 };
 
+UENUM(BlueprintType)
+enum class EBHCrowdAvoidanceQuality : uint8
+{
+	Low,
+	Medium,
+	Good,
+	High
+};
+
 /**
  * Server-authoritative controller for NavMesh enemy engagement.
  *
@@ -49,16 +58,56 @@ public:
 	UFUNCTION(BlueprintPure, Category = "AI|Target")
 	ABHHeroCharacter* GetCurrentTarget() const { return CurrentTarget; }
 
+	EBHCombatSlotType GetCurrentCombatSlotType() const { return CurrentSlotType; }
+
+	float GetSlotAcceptanceRadius() const { return SlotAcceptanceRadius; }
+
 	/** Releases the current reservation immediately and optionally delays the next request. */
 	void ReleaseCombatSlot(EBHCombatSlotReleaseReason Reason, float ReacquireDelay = 0.0f);
 
 protected:
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI|Crowd")
+	bool bEnableCrowdObstacleAvoidance = true;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI|Crowd")
+	bool bEnableCrowdSeparation = true;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI|Crowd", meta = (ClampMin = "0.0", UIMin = "0.0"))
+	float CrowdSeparationWeight = 2.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI|Crowd")
+	EBHCrowdAvoidanceQuality CrowdAvoidanceQuality = EBHCrowdAvoidanceQuality::High;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI|Crowd")
+	bool bEnableCrowdAnticipateTurns = true;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI|Crowd", meta = (ClampMin = "0.0", Units = "cm"))
+	float CrowdCollisionQueryRange = 500.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI|Crowd", meta = (ClampMin = "0.1", UIMin = "0.1"))
+	float CrowdAvoidanceRangeMultiplier = 1.2f;
+
 	/** Target validation and stalled-move retry interval. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI|Pursuit", meta = (ClampMin = "0.1", Units = "s"))
 	float TargetRefreshInterval = 0.5f;
 
+	/** Prevents small distance changes from repeatedly moving this enemy between players. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI|Pursuit", meta = (ClampMin = "0.0", Units = "s"))
+	float MinimumTargetHoldTime = 2.0f;
+
+	/** A challenger must be at least this much closer before replacing a reachable held target. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI|Pursuit", meta = (ClampMin = "0.0", Units = "cm"))
+	float TargetSwitchDistanceAdvantage = 200.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI|Pursuit")
+	FVector TargetNavProjectionExtent = FVector(100.0f, 100.0f, 250.0f);
+
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI|Engagement Slots", meta = (ClampMin = "0.0", Units = "cm"))
 	float SlotAcceptanceRadius = 15.0f;
+
+	/** Tight acceptance used for ring-alignment waypoints before inward ingress. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI|Engagement Slots", meta = (ClampMin = "0.0", Units = "cm"))
+	float RingWaypointAcceptanceRadius = 5.0f;
 
 	/** Reissue MoveTo after the moving player's reserved slot has shifted this far. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI|Engagement Slots", meta = (ClampMin = "1.0", Units = "cm"))
@@ -80,18 +129,22 @@ protected:
 	bool bDrawCrowdDebug = true;
 
 private:
+	void ApplyCrowdFollowingSettings();
 	void RefreshTargetAndMove();
-	ABHHeroCharacter* FindClosestPlayerHero() const;
+	ABHHeroCharacter* SelectTargetHero() const;
+	bool IsHeroReachable(const ABHHeroCharacter* Hero) const;
 	bool AcquireCombatSlot(ABHEnemy* ControlledEnemy);
 	void ReleaseCurrentCombatSlot(EBHCombatSlotReleaseReason Reason, bool bTemporarilyExcludeReleasedSlot = false);
-	void RequestMoveToReservedSlot(const FVector& SlotLocation);
+	bool ShouldPreserveQueuePosition(EBHCombatSlotReleaseReason Reason) const;
+	void RequestMoveToReservedSlot(const FVector& SlotLocation, float AcceptanceRadius);
 	bool UpdateStuckTracking(float DistanceToSlot, float Speed);
 	void ResetStuckTracking();
 	void DrawDebugStatus(const ABHEnemy* ControlledEnemy) const;
-	int32 GetExcludedSlotIndex(EBHCombatSlotType SlotType) const;
 
 	UPROPERTY(Transient)
 	TObjectPtr<ABHHeroCharacter> CurrentTarget;
+
+	float TargetAcquiredTime = 0.0f;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UCombatEngagementSlotComponent> CurrentSlotComponent;
@@ -101,7 +154,8 @@ private:
 	TWeakObjectPtr<AActor> CurrentSlotRequester;
 	FVector LastRequestedSlotLocation = FVector::ZeroVector;
 	bool bHasRequestedSlotMove = false;
-	bool bIsUsingStagedRoute = false;
+	EBHCombatMoveRouteStage CurrentMoveRouteStage = EBHCombatMoveRouteStage::Direct;
+	EBHCombatMoveRouteStage LastRequestedRouteStage = EBHCombatMoveRouteStage::Direct;
 
 	EBHCombatSlotType TrackedSlotType = EBHCombatSlotType::None;
 	int32 TrackedSlotIndex = INDEX_NONE;
