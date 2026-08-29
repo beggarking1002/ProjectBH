@@ -8,6 +8,7 @@
 #include "../ProjectBH.h"
 #include "DrawDebugHelpers.h"
 #include "EngineUtils.h"
+#include "GameFramework/CharacterMovementComponent.h"
 #include "Navigation/CrowdFollowingComponent.h"
 #include "Navigation/PathFollowingComponent.h"
 #include "NavigationPath.h"
@@ -24,13 +25,19 @@ void ABHCrowdEnemyAIController::OnPossess(APawn* InPawn)
 	}
 
 	ApplyCrowdFollowingSettings();
+	FRandomStream RefreshRandom(InPawn ? InPawn->GetUniqueID() : GetUniqueID());
+	const float MinimumRefreshInterval = FMath::Max(0.1f, TargetRefreshInterval - TargetRefreshJitter);
+	const float MaximumRefreshInterval = FMath::Max(MinimumRefreshInterval, TargetRefreshInterval + TargetRefreshJitter);
+	ResolvedTargetRefreshInterval = RefreshRandom.FRandRange(MinimumRefreshInterval, MaximumRefreshInterval);
+	const float FirstRefreshDelay = RefreshRandom.FRandRange(0.05f, ResolvedTargetRefreshInterval);
 	RefreshTargetAndMove();
 	GetWorldTimerManager().SetTimer(
 		TargetRefreshTimerHandle,
 		this,
 		&ThisClass::RefreshTargetAndMove,
-		TargetRefreshInterval,
-		true);
+		ResolvedTargetRefreshInterval,
+		true,
+		FirstRefreshDelay);
 }
 
 void ABHCrowdEnemyAIController::ApplyCrowdFollowingSettings()
@@ -92,6 +99,8 @@ void ABHCrowdEnemyAIController::OnUnPossess()
 	ClearFocus(EAIFocusPriority::Gameplay);
 	CurrentTarget = nullptr;
 	TargetAcquiredTime = 0.0f;
+	bInEngagementFormation = false;
+	ResetPursuitTracking();
 
 	Super::OnUnPossess();
 }
@@ -99,6 +108,15 @@ void ABHCrowdEnemyAIController::OnUnPossess()
 void ABHCrowdEnemyAIController::OnMoveCompleted(FAIRequestID RequestID, const FPathFollowingResult& Result)
 {
 	Super::OnMoveCompleted(RequestID, Result);
+	if (bHasRequestedPursuitMove)
+	{
+		bHasRequestedPursuitMove = false;
+		if (Result.Code == EPathFollowingResult::Success)
+		{
+			ResetStuckTracking();
+		}
+		return;
+	}
 	if (Result.Code == EPathFollowingResult::Success)
 	{
 		bHasRequestedSlotMove = false;
@@ -141,6 +159,7 @@ void ABHCrowdEnemyAIController::RefreshTargetAndMove()
 	if (ControlledEnemy->IsAttackLocked())
 	{
 		StopMovement();
+		ApplyMovementIntent(ControlledEnemy, AttackIngressSpeed, true);
 		DrawDebugStatus(ControlledEnemy);
 		return;
 	}
@@ -155,16 +174,20 @@ void ABHCrowdEnemyAIController::RefreshTargetAndMove()
 		ClearFocus(EAIFocusPriority::Gameplay);
 		CurrentTarget = SelectedHero;
 		TargetAcquiredTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
+		bInEngagementFormation = false;
+		ResetPursuitTracking();
 	}
 
 	if (!IsValid(CurrentTarget))
 	{
 		ReleaseCurrentCombatSlot(EBHCombatSlotReleaseReason::TargetLost);
+		StopMovement();
+		bInEngagementFormation = false;
+		ResetPursuitTracking();
 		DrawDebugStatus(ControlledEnemy);
 		return;
 	}
 
-	SetFocus(CurrentTarget, EAIFocusPriority::Gameplay);
 	if (GetWorld()->GetTimeSeconds() < SlotRequestBlockedUntil)
 	{
 		StopMovement();
@@ -172,6 +195,56 @@ void ABHCrowdEnemyAIController::RefreshTargetAndMove()
 		return;
 	}
 
+	const float DistanceToTarget = FVector::Dist2D(
+		ControlledEnemy->GetActorLocation(),
+		CurrentTarget->GetActorLocation());
+	LastDistanceToSlot = DistanceToTarget;
+	if (bInEngagementFormation && DistanceToTarget >= FMath::Max(EngagementEnterRadius, EngagementExitRadius))
+	{
+		ReleaseCurrentCombatSlot(EBHCombatSlotReleaseReason::LeftEngagementRange);
+		bInEngagementFormation = false;
+		ResetPursuitTracking();
+	}
+	else if (!bInEngagementFormation && DistanceToTarget <= FMath::Max(0.0f, EngagementEnterRadius))
+	{
+		bInEngagementFormation = true;
+		StopMovement();
+		ResetPursuitTracking();
+	}
+
+	if (!bInEngagementFormation)
+	{
+		if (CurrentSlotType != EBHCombatSlotType::None)
+		{
+			ReleaseCurrentCombatSlot(EBHCombatSlotReleaseReason::LeftEngagementRange);
+		}
+		ApplyMovementIntent(ControlledEnemy, PursuitSpeed, false);
+		RequestPursuitMove(ControlledEnemy);
+		DrawDebugStatus(ControlledEnemy);
+		return;
+	}
+
+	UCombatEngagementSlotComponent* TargetSlotComponent = CurrentTarget->GetCombatEngagementSlotComponent();
+	if (!TargetSlotComponent)
+	{
+		ReleaseCurrentCombatSlot(EBHCombatSlotReleaseReason::ReservationInvalid);
+		StopMovement();
+		DrawDebugStatus(ControlledEnemy);
+		return;
+	}
+
+	// Initial candidates are registered for fair Attack selection, but keep
+	// charging instead of visibly walking to provisional Wait/Holding slots.
+	if (TargetSlotComponent->IsInitialFormationPending())
+	{
+		AcquireCombatSlot(ControlledEnemy);
+		ApplyMovementIntent(ControlledEnemy, PursuitSpeed, true);
+		RequestPursuitMove(ControlledEnemy, InitialChargeStopRadius);
+		DrawDebugStatus(ControlledEnemy);
+		return;
+	}
+
+	ResetPursuitTracking();
 	if (!AcquireCombatSlot(ControlledEnemy))
 	{
 		StopMovement();
@@ -214,8 +287,20 @@ void ABHCrowdEnemyAIController::RefreshTargetAndMove()
 	const float DistanceToMoveGoal = FVector::Dist2D(GetPawn()->GetActorLocation(), MoveGoal);
 	LastDistanceToSlot = DistanceToSlot;
 	const bool bAtReservedSlot = DistanceToSlotSquared <= FMath::Square(SlotAcceptanceRadius);
+	const float CurrentMoveSpeed = ControlledEnemy->GetVelocity().Size2D();
+	const bool bCanSettleAtReservedSlot = bAtReservedSlot
+		&& CurrentMoveSpeed <= FMath::Max(0.0f, SlotSettleSpeedThreshold);
 	if (CurrentSlotType == EBHCombatSlotType::Attack && bAtReservedSlot)
 	{
+		ApplyMovementIntent(ControlledEnemy, AttackIngressSpeed, true);
+		if (!bCanSettleAtReservedSlot)
+		{
+			// Do not replace the completed path with another zero-length request.
+			// CharacterMovement is still braking and will settle on a later refresh.
+			DrawDebugStatus(ControlledEnemy);
+			return;
+		}
+
 		StopMovement();
 		bHasRequestedSlotMove = false;
 		bIsReforming = false;
@@ -240,6 +325,13 @@ void ABHCrowdEnemyAIController::RefreshTargetAndMove()
 
 	if (bAtReservedSlot)
 	{
+		ApplyMovementIntent(ControlledEnemy, GetCurrentSlotMoveSpeed(), true);
+		if (!bCanSettleAtReservedSlot)
+		{
+			DrawDebugStatus(ControlledEnemy);
+			return;
+		}
+
 		StopMovement();
 		bHasRequestedSlotMove = false;
 		bIsReforming = false;
@@ -247,6 +339,11 @@ void ABHCrowdEnemyAIController::RefreshTargetAndMove()
 		DrawDebugStatus(ControlledEnemy);
 		return;
 	}
+
+	ApplyMovementIntent(
+		ControlledEnemy,
+		GetCurrentSlotMoveSpeed(),
+		true);
 
 	if (bHasRequestedSlotMove
 		&& UpdateStuckTracking(DistanceToMoveGoal, ControlledEnemy->GetVelocity().Size2D()))
@@ -282,7 +379,7 @@ void ABHCrowdEnemyAIController::RefreshTargetAndMove()
 
 	const bool bRouteStageChanged = CurrentMoveRouteStage != LastRequestedRouteStage;
 	const bool bSlotMoved = !bHasRequestedSlotMove
-		|| FVector::DistSquared2D(LastRequestedSlotLocation, MoveGoal) >= FMath::Square(SlotRepathDistance);
+		|| FVector::DistSquared2D(LastRequestedSlotLocation, MoveGoal) >= FMath::Square(GetCurrentSlotRepathDistance());
 	if (bTargetChanged || bRouteStageChanged || bSlotMoved || GetMoveStatus() != EPathFollowingStatus::Moving)
 	{
 		const bool bUsesRingWaypoint = CurrentMoveRouteStage == EBHCombatMoveRouteStage::ApproachRing
@@ -460,6 +557,135 @@ bool ABHCrowdEnemyAIController::AcquireCombatSlot(ABHEnemy* ControlledEnemy)
 	return bHasReservation || bHasPendingLocation;
 }
 
+void ABHCrowdEnemyAIController::RequestPursuitMove(
+	ABHEnemy* ControlledEnemy,
+	float AcceptanceRadius)
+{
+	if (!ControlledEnemy || !IsValid(CurrentTarget) || !GetWorld())
+	{
+		return;
+	}
+
+	FVector PursuitGoal = CurrentTarget->GetActorLocation()
+		+ CurrentTarget->GetVelocity() * FMath::Max(0.0f, PursuitPredictionTime);
+	if (const UNavigationSystemV1* NavigationSystem = FNavigationSystem::GetCurrent<UNavigationSystemV1>(GetWorld()))
+	{
+		FNavLocation ProjectedGoal;
+		if (NavigationSystem->ProjectPointToNavigation(PursuitGoal, ProjectedGoal, TargetNavProjectionExtent))
+		{
+			PursuitGoal = ProjectedGoal.Location;
+		}
+	}
+
+	const bool bGoalMoved = !bHasRequestedPursuitMove
+		|| FVector::DistSquared2D(LastRequestedPursuitLocation, PursuitGoal)
+			>= FMath::Square(FMath::Max(1.0f, PursuitRepathDistance));
+	if (!bGoalMoved && GetMoveStatus() == EPathFollowingStatus::Moving)
+	{
+		return;
+	}
+
+	const EPathFollowingRequestResult::Type RequestResult = MoveToLocation(
+		PursuitGoal,
+		FMath::Max(0.0f, AcceptanceRadius),
+		false,
+		true,
+		true,
+		true,
+		nullptr,
+		false);
+	if (RequestResult == EPathFollowingRequestResult::Failed)
+	{
+		bHasRequestedPursuitMove = false;
+		UE_LOG(
+			LogProjectBH,
+			Verbose,
+			TEXT("%s could not path toward pursuit goal for %s."),
+			*GetName(),
+			*CurrentTarget->GetName());
+		return;
+	}
+
+	LastRequestedPursuitLocation = PursuitGoal;
+	bHasRequestedPursuitMove = true;
+	bHasRequestedSlotMove = false;
+}
+
+void ABHCrowdEnemyAIController::ApplyMovementIntent(
+	ABHEnemy* ControlledEnemy,
+	float MoveSpeed,
+	bool bFaceTarget)
+{
+	if (!ControlledEnemy)
+	{
+		return;
+	}
+
+	if (UCharacterMovementComponent* Movement = ControlledEnemy->GetCharacterMovement())
+	{
+		// Path following normally writes velocity directly. Acceleration-based paths
+		// let CharacterMovement brake and accelerate instead of changing speed in steps.
+		if (FNavMovementProperties* NavMovementProperties = Movement->GetNavMovementProperties())
+		{
+			NavMovementProperties->bUseAccelerationForPaths = true;
+		}
+		Movement->bRequestedMoveUseAcceleration = true;
+		Movement->MaxWalkSpeed = FMath::Max(0.0f, MoveSpeed);
+		Movement->bOrientRotationToMovement = !bFaceTarget;
+		Movement->bUseControllerDesiredRotation = bFaceTarget;
+	}
+	ControlledEnemy->bUseControllerRotationYaw = false;
+
+	if (bFaceTarget && IsValid(CurrentTarget))
+	{
+		SetFocus(CurrentTarget, EAIFocusPriority::Gameplay);
+	}
+	else
+	{
+		ClearFocus(EAIFocusPriority::Gameplay);
+	}
+}
+
+float ABHCrowdEnemyAIController::GetCurrentSlotMoveSpeed() const
+{
+	switch (CurrentSlotType)
+	{
+	case EBHCombatSlotType::Attack:
+		return AttackIngressSpeed;
+	case EBHCombatSlotType::Wait:
+		return WaitMoveSpeed;
+	case EBHCombatSlotType::Holding:
+	case EBHCombatSlotType::Pending:
+		return HoldingMoveSpeed;
+	case EBHCombatSlotType::None:
+	default:
+		return PursuitSpeed;
+	}
+}
+
+float ABHCrowdEnemyAIController::GetCurrentSlotRepathDistance() const
+{
+	switch (CurrentSlotType)
+	{
+	case EBHCombatSlotType::Attack:
+		return FMath::Max(1.0f, SlotRepathDistance);
+	case EBHCombatSlotType::Wait:
+		return FMath::Max(1.0f, WaitSlotRepathDistance);
+	case EBHCombatSlotType::Holding:
+	case EBHCombatSlotType::Pending:
+		return FMath::Max(1.0f, HoldingSlotRepathDistance);
+	case EBHCombatSlotType::None:
+	default:
+		return FMath::Max(1.0f, PursuitRepathDistance);
+	}
+}
+
+void ABHCrowdEnemyAIController::ResetPursuitTracking()
+{
+	bHasRequestedPursuitMove = false;
+	LastRequestedPursuitLocation = FVector::ZeroVector;
+}
+
 void ABHCrowdEnemyAIController::ReleaseCurrentCombatSlot(
 	EBHCombatSlotReleaseReason Reason,
 	bool bTemporarilyExcludeReleasedSlot)
@@ -590,7 +816,7 @@ bool ABHCrowdEnemyAIController::UpdateStuckTracking(float DistanceToSlot, float 
 
 	if (Speed < StuckSpeedThreshold)
 	{
-		StuckElapsed += TargetRefreshInterval;
+		StuckElapsed += ResolvedTargetRefreshInterval;
 	}
 	else
 	{
@@ -654,7 +880,7 @@ void ABHCrowdEnemyAIController::DrawDebugStatus(const ABHEnemy* ControlledEnemy)
 			LastRequestedSlotLocation,
 			RouteColor,
 			false,
-			TargetRefreshInterval + 0.1f,
+			ResolvedTargetRefreshInterval + 0.1f,
 			0,
 			2.0f);
 		DrawDebugSphere(
@@ -664,19 +890,45 @@ void ABHCrowdEnemyAIController::DrawDebugStatus(const ABHEnemy* ControlledEnemy)
 			8,
 			RouteColor,
 			false,
-			TargetRefreshInterval + 0.1f,
+			ResolvedTargetRefreshInterval + 0.1f,
 			0,
 			1.5f);
 	}
+	else if (bHasRequestedPursuitMove)
+	{
+		DrawDebugLine(
+			GetWorld(),
+			ControlledEnemy->GetActorLocation(),
+			LastRequestedPursuitLocation,
+			FColor::Green,
+			false,
+			ResolvedTargetRefreshInterval + 0.1f,
+			0,
+			2.0f);
+	}
+	const bool bInitialCharge = bInEngagementFormation
+		&& CurrentSlotComponent
+		&& CurrentSlotComponent->IsInitialFormationPending();
+	const TCHAR* MovementMode = !bInEngagementFormation
+		? TEXT("Pursuit")
+		: (bInitialCharge ? TEXT("InitialCharge") : TEXT("Formation"));
+	const UCharacterMovementComponent* CharacterMovement = ControlledEnemy->GetCharacterMovement();
+	const TCHAR* FacingMode = CharacterMovement && CharacterMovement->bUseControllerDesiredRotation
+		? TEXT("Target")
+		: TEXT("Move");
 	const FString DebugText = FString::Printf(
-		TEXT("%s | Target:%s Held:%.1f | %s[%d] Seq:%llu Dist:%.0f Route:%s Stuck:%.1f Starts:%d | Reform:%s(%d) | Last:%s"),
+		TEXT("%s/%s %.2fs | Target:%s Held:%.1f | %s[%d] Seq:%llu Dist:%.0f Speed:%.1f Facing:%s Route:%s Stuck:%.1f Starts:%d | Reform:%s(%d) | Last:%s"),
 		*CombatStateName,
+		MovementMode,
+		ResolvedTargetRefreshInterval,
 		IsValid(CurrentTarget) ? *CurrentTarget->GetName() : TEXT("None"),
 		TargetHeldTime,
 		*SlotName,
 		CurrentSlotIndex,
 		static_cast<unsigned long long>(QueueSequence),
 		LastDistanceToSlot,
+		ControlledEnemy->GetVelocity().Size2D(),
+		FacingMode,
 		*RouteStageName,
 		StuckElapsed,
 		ControlledEnemy->GetSuccessfulAttackStartCount(),
@@ -695,7 +947,7 @@ void ABHCrowdEnemyAIController::DrawDebugStatus(const ABHEnemy* ControlledEnemy)
 				: (CurrentSlotType == EBHCombatSlotType::Holding
 					? FColor::Purple
 					: (CurrentSlotType == EBHCombatSlotType::Pending ? FColor(0, 200, 120) : FColor::Silver))),
-		TargetRefreshInterval + 0.1f,
+		ResolvedTargetRefreshInterval + 0.1f,
 		false,
 		0.85f);
 }

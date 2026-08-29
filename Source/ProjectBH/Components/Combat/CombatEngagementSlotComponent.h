@@ -28,6 +28,8 @@ enum class EBHCombatMoveRouteStage : uint8
 
 /**
  * Server-authoritative reservation manager for combat positions around its owner.
+ * Attack slots follow the owner directly, while outer formation rings may use a
+ * delayed engagement anchor so the whole crowd does not mirror target movement.
  *
  * Slots are world-aligned rings around the owner. Their current positions are
  * projected onto NavMesh whenever an enemy requests or reads a reservation.
@@ -99,6 +101,9 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Combat|Engagement Slots")
 	int32 GetFormationRevision() const { return FormationRevision; }
 
+	/** Initial candidates keep pursuing while this component gathers them for a fair assignment. */
+	bool IsInitialFormationPending() const { return bInitialFormationActive; }
+
 protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Engagement Slots", meta = (ClampMin = "1", UIMin = "1"))
 	int32 AttackSlotCount = 4;
@@ -149,7 +154,35 @@ protected:
 
 	/** Angular tolerance before an Enemy may leave an outer ring and enter its inner reserved slot. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Approach Routing", meta = (ClampMin = "0.1", ClampMax = "15.0", Units = "deg"))
-	float RingIngressAngleTolerance = 1.0f;
+	float RingIngressAngleTolerance = 10.0f;
+
+	/** Wait/Holding centers do not mirror every small player movement. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Engagement Anchor", meta = (ClampMin = "0.0", Units = "cm"))
+	float EngagementAnchorDeadZone = 175.0f;
+
+	/** Maximum follow speed once the player leaves the anchor dead zone. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Engagement Anchor", meta = (ClampMin = "0.0", Units = "cm/s"))
+	float EngagementAnchorFollowSpeed = 350.0f;
+
+	/** The owner must remain below this speed before the delayed anchor starts recentering. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Engagement Anchor", meta = (ClampMin = "0.0", Units = "cm/s"))
+	float EngagementAnchorStopSpeedThreshold = 15.0f;
+
+	/** Re-enter delayed following only after the owner clearly resumes movement. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Engagement Anchor", meta = (ClampMin = "0.0", Units = "cm/s"))
+	float EngagementAnchorResumeSpeedThreshold = 40.0f;
+
+	/** Prevents brief pauses during movement from immediately pulling the outer formation inward. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Engagement Anchor", meta = (ClampMin = "0.0", Units = "s"))
+	float EngagementAnchorSettleDelay = 0.35f;
+
+	/** Speed used to return Wait/Holding/Pending rings to a stationary player. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Engagement Anchor", meta = (ClampMin = "0.0", Units = "cm/s"))
+	float EngagementAnchorRecenterSpeed = 200.0f;
+
+	/** Snap the anchor to the player inside this distance to avoid a permanent residual offset. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Engagement Anchor", meta = (ClampMin = "0.0", Units = "cm"))
+	float EngagementAnchorRecenterSnapDistance = 7.5f;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Engagement Slots", meta = (Units = "deg"))
 	float AttackRingAngleOffset = 45.0f;
@@ -181,13 +214,14 @@ protected:
 
 	/** Reassigns occupied slots within each ring after the owner moves this far from the last reform anchor. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Engagement Slots", meta = (ClampMin = "0.0", Units = "cm"))
-	float ReformTriggerDistance = 500.0f;
+	float ReformTriggerDistance = 0.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Debug|Engagement Slots")
 	bool bDrawDebugSlots = true;
 
 private:
 	void InitializeSlots();
+	void UpdateEngagementAnchor(float DeltaTime);
 	void PruneInvalidReservations();
 	void RefreshInitialFormationPhase();
 	void FinalizeInitialFormationAssignments();
@@ -250,6 +284,9 @@ private:
 	uint64 NextQueueSequence = 1;
 	float LastRequesterRegistrationTime = 0.0f;
 	bool bInitialFormationActive = true;
+	FVector EngagementAnchorLocation = FVector::ZeroVector;
+	float EngagementAnchorStoppedElapsed = 0.0f;
+	bool bEngagementAnchorRecentering = false;
 	FVector LastReformOwnerLocation = FVector::ZeroVector;
 	int32 FormationRevision = 0;
 	int32 CurrentSpacingViolationCount = 0;

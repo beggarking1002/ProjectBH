@@ -24,7 +24,8 @@ void UCombatEngagementSlotComponent::BeginPlay()
 	Super::BeginPlay();
 
 	InitializeSlots();
-	LastReformOwnerLocation = GetOwner() ? GetOwner()->GetActorLocation() : FVector::ZeroVector;
+	EngagementAnchorLocation = GetOwner() ? GetOwner()->GetActorLocation() : FVector::ZeroVector;
+	LastReformOwnerLocation = EngagementAnchorLocation;
 }
 
 void UCombatEngagementSlotComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
@@ -47,6 +48,7 @@ void UCombatEngagementSlotComponent::TickComponent(float DeltaTime, ELevelTick T
 	}
 
 	PruneInvalidReservations();
+	UpdateEngagementAnchor(DeltaTime);
 	RefreshInitialFormationPhase();
 	if (!IsInitialFormationActive())
 	{
@@ -275,7 +277,7 @@ bool UCombatEngagementSlotComponent::GetPendingWaitLocation(
 		+ 360.0f * static_cast<float>(SlotIndexOnRing) / static_cast<float>(SlotsPerRing);
 	const float AngleRadians = FMath::DegreesToRadians(AngleDegrees);
 	const FVector RingDirection(FMath::Cos(AngleRadians), FMath::Sin(AngleRadians), 0.0f);
-	return ProjectToNavigation(Owner->GetActorLocation() + RingDirection * RingRadius, OutWorldLocation);
+	return ProjectToNavigation(EngagementAnchorLocation + RingDirection * RingRadius, OutWorldLocation);
 }
 
 bool UCombatEngagementSlotComponent::GetMoveGoalForReservedSlot(
@@ -298,9 +300,12 @@ bool UCombatEngagementSlotComponent::GetMoveGoalForReservedSlot(
 
 	const FVector RequesterLocation = Requester->GetActorLocation();
 	const FVector OwnerLocation = Owner->GetActorLocation();
-	FVector RequesterDirection = RequesterLocation - OwnerLocation;
+	const FVector RouteCenter = SlotType == EBHCombatSlotType::Attack
+		? OwnerLocation
+		: EngagementAnchorLocation;
+	FVector RequesterDirection = RequesterLocation - RouteCenter;
 	RequesterDirection.Z = 0.0f;
-	FVector TargetDirection = FinalSlotLocation - OwnerLocation;
+	FVector TargetDirection = FinalSlotLocation - RouteCenter;
 	TargetDirection.Z = 0.0f;
 	const float FinalSlotRadius = TargetDirection.Size2D();
 	if (FinalSlotRadius <= UE_KINDA_SMALL_NUMBER)
@@ -366,7 +371,7 @@ bool UCombatEngagementSlotComponent::GetMoveGoalForReservedSlot(
 			<= OrbitRingAcceptanceRadius;
 		if (!bContinueRingAlignment && !bAtIngressStagingRing)
 		{
-			DesiredWaypoint = OwnerLocation + RequesterDirection * IngressStagingRadius;
+			DesiredWaypoint = RouteCenter + RequesterDirection * IngressStagingRadius;
 			OutRouteStage = EBHCombatMoveRouteStage::ApproachRing;
 		}
 		else
@@ -376,7 +381,7 @@ bool UCombatEngagementSlotComponent::GetMoveGoalForReservedSlot(
 				-OrbitWaypointAngleStep,
 				OrbitWaypointAngleStep);
 			const float NextAngleRadians = FMath::DegreesToRadians(RequesterAngle + StepAngle);
-			DesiredWaypoint = OwnerLocation
+			DesiredWaypoint = RouteCenter
 				+ FVector(FMath::Cos(NextAngleRadians), FMath::Sin(NextAngleRadians), 0.0f)
 					* IngressStagingRadius;
 			OutRouteStage = EBHCombatMoveRouteStage::AlignOnRing;
@@ -411,7 +416,7 @@ bool UCombatEngagementSlotComponent::GetMoveGoalForReservedSlot(
 	FVector DesiredWaypoint;
 	if (FMath::Abs(RequesterRadius - OrbitRadius) > OrbitRingAcceptanceRadius)
 	{
-		DesiredWaypoint = OwnerLocation + RequesterDirection * OrbitRadius;
+		DesiredWaypoint = RouteCenter + RequesterDirection * OrbitRadius;
 	}
 	else
 	{
@@ -420,7 +425,7 @@ bool UCombatEngagementSlotComponent::GetMoveGoalForReservedSlot(
 			-OrbitWaypointAngleStep,
 			OrbitWaypointAngleStep);
 		const float NextAngleRadians = FMath::DegreesToRadians(RequesterAngle + StepAngle);
-		DesiredWaypoint = OwnerLocation
+		DesiredWaypoint = RouteCenter
 			+ FVector(FMath::Cos(NextAngleRadians), FMath::Sin(NextAngleRadians), 0.0f) * OrbitRadius;
 	}
 
@@ -529,6 +534,71 @@ void UCombatEngagementSlotComponent::InitializeSlots()
 	AttackReservations.SetNum(FMath::Max(1, AttackSlotCount));
 	WaitReservations.SetNum(FMath::Max(1, WaitSlotCount));
 	HoldingReservations.SetNum(FMath::Max(1, HoldingSlotCount));
+}
+
+void UCombatEngagementSlotComponent::UpdateEngagementAnchor(float DeltaTime)
+{
+	const AActor* Owner = GetOwner();
+	if (!Owner)
+	{
+		return;
+	}
+
+	const float SafeDeltaTime = FMath::Max(0.0f, DeltaTime);
+	const float OwnerSpeed = Owner->GetVelocity().Size2D();
+	const float StopSpeedThreshold = FMath::Max(0.0f, EngagementAnchorStopSpeedThreshold);
+	const float ResumeSpeedThreshold = FMath::Max(StopSpeedThreshold, EngagementAnchorResumeSpeedThreshold);
+	if (bEngagementAnchorRecentering)
+	{
+		if (OwnerSpeed >= ResumeSpeedThreshold)
+		{
+			bEngagementAnchorRecentering = false;
+			EngagementAnchorStoppedElapsed = 0.0f;
+		}
+	}
+	else if (OwnerSpeed <= StopSpeedThreshold)
+	{
+		EngagementAnchorStoppedElapsed += SafeDeltaTime;
+		if (EngagementAnchorStoppedElapsed >= FMath::Max(0.0f, EngagementAnchorSettleDelay))
+		{
+			bEngagementAnchorRecentering = true;
+		}
+	}
+	else
+	{
+		EngagementAnchorStoppedElapsed = 0.0f;
+	}
+
+	const FVector OwnerLocation = Owner->GetActorLocation();
+	FVector ToOwner = OwnerLocation - EngagementAnchorLocation;
+	ToOwner.Z = 0.0f;
+	const float Distance = ToOwner.Size2D();
+	if (bEngagementAnchorRecentering)
+	{
+		const float SnapDistance = FMath::Max(0.0f, EngagementAnchorRecenterSnapDistance);
+		const float RecenterDistance = FMath::Max(0.0f, EngagementAnchorRecenterSpeed) * SafeDeltaTime;
+		if (Distance <= SnapDistance || RecenterDistance >= Distance)
+		{
+			EngagementAnchorLocation.X = OwnerLocation.X;
+			EngagementAnchorLocation.Y = OwnerLocation.Y;
+		}
+		else if (!ToOwner.IsNearlyZero())
+		{
+			EngagementAnchorLocation += ToOwner.GetSafeNormal2D() * RecenterDistance;
+		}
+	}
+	else
+	{
+		const float DeadZone = FMath::Max(0.0f, EngagementAnchorDeadZone);
+		if (Distance > DeadZone && !ToOwner.IsNearlyZero())
+		{
+			const float FollowDistance = FMath::Min(
+				Distance - DeadZone,
+				FMath::Max(0.0f, EngagementAnchorFollowSpeed) * SafeDeltaTime);
+			EngagementAnchorLocation += ToOwner.GetSafeNormal2D() * FollowDistance;
+		}
+	}
+	EngagementAnchorLocation.Z = OwnerLocation.Z;
 }
 
 void UCombatEngagementSlotComponent::PruneInvalidReservations()
@@ -1228,7 +1298,7 @@ float UCombatEngagementSlotComponent::GetMaximumAttackSlotDistance(AActor* Reque
 		return 0.0f;
 	}
 
-	float ArrivalTolerance = 15.0f;
+	float ArrivalTolerance = 20.0f;
 	if (const ABHCrowdEnemyAIController* CrowdController = Cast<ABHCrowdEnemyAIController>(Enemy->GetController()))
 	{
 		ArrivalTolerance = CrowdController->GetSlotAcceptanceRadius();
@@ -1364,7 +1434,10 @@ bool UCombatEngagementSlotComponent::GetSlotWorldLocation(
 	const float AngleDegrees = AngleOffset + (360.0f * static_cast<float>(SlotIndex) / static_cast<float>(SlotCount));
 	const float AngleRadians = FMath::DegreesToRadians(AngleDegrees);
 	const FVector RingDirection(FMath::Cos(AngleRadians), FMath::Sin(AngleRadians), 0.0f);
-	const FVector DesiredLocation = Owner->GetActorLocation() + RingDirection * RingRadius;
+	const FVector RingCenter = SlotType == EBHCombatSlotType::Attack
+		? Owner->GetActorLocation()
+		: EngagementAnchorLocation;
+	const FVector DesiredLocation = RingCenter + RingDirection * RingRadius;
 
 	return ProjectToNavigation(DesiredLocation, OutWorldLocation);
 }
@@ -1633,6 +1706,27 @@ void UCombatEngagementSlotComponent::DrawDebugSlots() const
 		FVector::ForwardVector,
 		FVector::RightVector,
 		false);
+
+	const FColor AnchorDebugColor = bEngagementAnchorRecentering ? FColor::Yellow : FColor::Cyan;
+	DrawDebugSphere(
+		World,
+		EngagementAnchorLocation,
+		18.0f,
+		10,
+		AnchorDebugColor,
+		false,
+		0.12f,
+		0,
+		2.0f);
+	DrawDebugLine(
+		World,
+		Owner->GetActorLocation(),
+		EngagementAnchorLocation,
+		AnchorDebugColor,
+		false,
+		0.12f,
+		0,
+		1.5f);
 
 	for (int32 SlotIndex = 0; SlotIndex < AttackReservations.Num(); ++SlotIndex)
 	{

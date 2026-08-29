@@ -5,6 +5,8 @@
 #include "BHEnemy.h"
 #include "../ProjectBH.h"
 #include "DrawDebugHelpers.h"
+#include "Engine/TargetPoint.h"
+#include "EngineUtils.h"
 #include "Kismet/GameplayStatics.h"
 #include "NavigationSystem.h"
 
@@ -22,8 +24,51 @@ void ABHEnemyPoolManager::BeginPlay()
 
 	if (HasAuthority())
 	{
+		ResolveSpawnPoints();
 		InitializePool();
 	}
+}
+
+void ABHEnemyPoolManager::ResolveSpawnPoints()
+{
+	SpawnPoints.RemoveAll(
+		[](const TObjectPtr<AActor>& SpawnPoint)
+		{
+			return !IsValid(SpawnPoint);
+		});
+
+	if (!SpawnPoints.IsEmpty() || !bAutoDiscoverTargetPointsWhenEmpty || !GetWorld())
+	{
+		return;
+	}
+
+	for (TActorIterator<ATargetPoint> Iterator(GetWorld()); Iterator; ++Iterator)
+	{
+		SpawnPoints.Add(*Iterator);
+	}
+
+	SpawnPoints.Sort(
+		[](const AActor& Left, const AActor& Right)
+		{
+			return Left.GetName() < Right.GetName();
+		});
+
+	if (SpawnPoints.IsEmpty())
+	{
+		UE_LOG(
+			LogProjectBH,
+			Warning,
+			TEXT("%s has no valid Spawn Points or TargetPoint actors; using its fallback grid."),
+			*GetName());
+		return;
+	}
+
+	UE_LOG(
+		LogProjectBH,
+		Display,
+		TEXT("%s auto-discovered %d TargetPoint spawn point(s)."),
+		*GetName(),
+		SpawnPoints.Num());
 }
 
 void ABHEnemyPoolManager::Tick(float DeltaSeconds)
@@ -326,10 +371,27 @@ FTransform ABHEnemyPoolManager::GetNextSpawnTransform()
 {
 	for (int32 Attempt = 0; Attempt < SpawnPoints.Num(); ++Attempt)
 	{
-		const int32 Index = NextSpawnPointIndex++ % SpawnPoints.Num();
+		const int32 SpawnSequence = NextSpawnPointIndex++;
+		const int32 Index = SpawnSequence % SpawnPoints.Num();
 		if (const AActor* SpawnPoint = SpawnPoints[Index])
 		{
 			FTransform Result = SpawnPoint->GetActorTransform();
+			const int32 EffectiveLimit = FMath::Max(1, FMath::Min(ActiveEnemyLimit, PoolEnemies.Num()));
+			const int32 UsesPerPoint = FMath::Max(1, FMath::CeilToInt(
+				static_cast<float>(EffectiveLimit) / static_cast<float>(SpawnPoints.Num())));
+			const int32 ReuseIndex = (SpawnSequence / SpawnPoints.Num()) % UsesPerPoint;
+			if (bSpreadRepeatedSpawnPoints && UsesPerPoint > 1)
+			{
+				const int32 Columns = FMath::Max(1, FMath::CeilToInt(FMath::Sqrt(static_cast<float>(UsesPerPoint))));
+				const int32 Rows = FMath::CeilToInt(static_cast<float>(UsesPerPoint) / static_cast<float>(Columns));
+				const int32 Column = ReuseIndex % Columns;
+				const int32 Row = ReuseIndex / Columns;
+				const FVector LocalOffset(
+					(static_cast<float>(Column) - static_cast<float>(Columns - 1) * 0.5f) * FallbackSpawnSpacing,
+					(static_cast<float>(Row) - static_cast<float>(Rows - 1) * 0.5f) * FallbackSpawnSpacing,
+					0.0f);
+				Result.AddToTranslation(SpawnPoint->GetActorRotation().RotateVector(LocalOffset));
+			}
 			if (const UNavigationSystemV1* NavigationSystem = FNavigationSystem::GetCurrent<UNavigationSystemV1>(GetWorld()))
 			{
 				FNavLocation ProjectedLocation;

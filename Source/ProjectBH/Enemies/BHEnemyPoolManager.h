@@ -65,6 +65,14 @@ protected:
 	UPROPERTY(EditInstanceOnly, BlueprintReadOnly, Category = "Enemy Pool|Spawn")
 	TArray<TObjectPtr<AActor>> SpawnPoints;
 
+	/** If no valid SpawnPoints are assigned, discover TargetPoint actors in the current world. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Enemy Pool|Spawn")
+	bool bAutoDiscoverTargetPointsWhenEmpty = true;
+
+	/** Spread repeated uses around each Spawn Point instead of stacking enemies at one transform. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Enemy Pool|Spawn")
+	bool bSpreadRepeatedSpawnPoints = true;
+
 	/** Grid spacing around this manager when no valid Spawn Point is assigned. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Enemy Pool|Spawn", meta = (ClampMin = "0.0", Units = "cm"))
 	float FallbackSpawnSpacing = 175.0f;
@@ -94,6 +102,7 @@ private:
 	};
 
 	void InitializePool();
+	void ResolveSpawnPoints();
 	ABHEnemy* SpawnPooledEnemy(int32 PoolIndex);
 	void ReconcileRespawnDemand();
 	void ProcessOneReadyRespawn();

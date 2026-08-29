@@ -22,3 +22,27 @@ void UBHEnemyAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 	bIsStaggered = CombatState == EBHEnemyCombatState::Staggered;
 	bIsDead = CombatState == EBHEnemyCombatState::Dead;
 }
+
+void UBHEnemyAnimInstance::NativeThreadSafeUpdateAnimation(float DeltaSeconds)
+{
+	Super::NativeThreadSafeUpdateAnimation(DeltaSeconds);
+	if (!OwningCharacter || !OwningMovementComponent)
+	{
+		return;
+	}
+
+	const float ExitSpeed = FMath::Max(0.0f, MoveExitSpeed);
+	const float EnterSpeed = FMath::Max(ExitSpeed, MoveEnterSpeed);
+	if (bShouldMove)
+	{
+		bShouldMove = GroundSpeed > ExitSpeed;
+	}
+	else
+	{
+		bShouldMove = GroundSpeed >= EnterSpeed;
+	}
+
+	// Enemy ABPs currently use bHasAcceleration for Idle/Jog transitions.
+	// Preserve that wiring while giving it the stable speed-based meaning above.
+	bHasAcceleration = bShouldMove;
+}
