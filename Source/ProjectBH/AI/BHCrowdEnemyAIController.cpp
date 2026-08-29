@@ -906,6 +906,9 @@ void ABHCrowdEnemyAIController::DrawDebugStatus(const ABHEnemy* ControlledEnemy)
 	const uint64 QueueSequence = CurrentSlotComponent && CurrentSlotRequester.IsValid()
 		? CurrentSlotComponent->GetQueueSequenceForRequester(CurrentSlotRequester.Get())
 		: 0;
+	const int32 CorridorLane = CurrentSlotComponent && CurrentSlotRequester.IsValid()
+		? CurrentSlotComponent->GetCorridorLaneForRequester(CurrentSlotRequester.Get())
+		: INDEX_NONE;
 	FColor RouteColor = FColor::White;
 	switch (CurrentMoveRouteStage)
 	{
@@ -967,7 +970,7 @@ void ABHCrowdEnemyAIController::DrawDebugStatus(const ABHEnemy* ControlledEnemy)
 		? TEXT("Target")
 		: TEXT("Move");
 	const FString DebugText = FString::Printf(
-		TEXT("%s/%s %.2fs | Target:%s Held:%.1f | %s[%d] Seq:%llu Dist:%.0f Speed:%.1f Facing:%s Route:%s Stuck:%.1f Starts:%d | Reform:%s(%d) | Last:%s"),
+		TEXT("%s/%s %.2fs | Target:%s Held:%.1f | %s[%d] Lane:%d Seq:%llu Dist:%.0f Speed:%.1f Facing:%s Route:%s Stuck:%.1f Starts:%d | Reform:%s(%d) | Last:%s"),
 		*CombatStateName,
 		MovementMode,
 		ResolvedTargetRefreshInterval,
@@ -975,6 +978,7 @@ void ABHCrowdEnemyAIController::DrawDebugStatus(const ABHEnemy* ControlledEnemy)
 		TargetHeldTime,
 		*SlotName,
 		CurrentSlotIndex,
+		CorridorLane,
 		static_cast<unsigned long long>(QueueSequence),
 		LastDistanceToSlot,
 		ControlledEnemy->GetVelocity().Size2D(),

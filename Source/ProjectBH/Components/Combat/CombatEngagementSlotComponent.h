@@ -132,6 +132,10 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Combat|Space Analysis")
 	int32 GetActiveAttackSlotCount() const;
 
+	/** Stable Queue Sequence lane used by the active Corridor formation. */
+	UFUNCTION(BlueprintPure, Category = "Combat|Space Analysis")
+	int32 GetCorridorLaneForRequester(AActor* Requester) const;
+
 protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Engagement Slots", meta = (ClampMin = "1", UIMin = "1"))
 	int32 AttackSlotCount = 4;
@@ -287,7 +291,7 @@ protected:
 
 	/** Upper bound for side-by-side lanes regardless of measured width. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Corridor Formation", meta = (ClampMin = "1", ClampMax = "4", UIMin = "1", UIMax = "4"))
-	int32 CorridorMaximumLaneCount = 3;
+	int32 CorridorMaximumLaneCount = 2;
 
 	/** Maximum half-angle used by the one-sided Attack arc in a corridor. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Corridor Formation", meta = (ClampMin = "0.0", ClampMax = "89.0", Units = "deg"))
@@ -335,7 +339,32 @@ private:
 	void UpdateCorridorFormationDirection();
 	void RefreshCorridorFormationCapacity();
 	void ReconcileCorridorAttackReservations();
+	void RepackCorridorLayerReservations(
+		TArray<TWeakObjectPtr<AActor>>& Reservations,
+		EBHCombatSlotType SlotType,
+		bool bNotifyMovedRequesters);
+	void RepackAllCorridorQueueLayers(bool bNotifyMovedRequesters);
 	int32 GetLockedAttackReservationCount() const;
+	int32 GetCorridorLaneIndex(AActor* Requester) const;
+	bool HasFreeCorridorLaneSlot(
+		const TArray<TWeakObjectPtr<AActor>>& Reservations,
+		int32 LaneIndex) const;
+	bool FindCorridorLayerHead(
+		const TArray<TWeakObjectPtr<AActor>>& Reservations,
+		EBHCombatSlotType SlotType,
+		int32 LaneIndex,
+		bool bRequireArrival,
+		int32& OutSlotIndex) const;
+	bool FindCorridorPromotionCandidate(
+		const TArray<TWeakObjectPtr<AActor>>& SourceReservations,
+		EBHCombatSlotType SourceType,
+		const TArray<TWeakObjectPtr<AActor>>& DestinationReservations,
+		int32& OutSourceIndex) const;
+	bool FindCorridorPendingCandidateForHolding(AActor*& OutRequester) const;
+	bool FindCorridorWaitAdmissionForAttackSlot(
+		int32 AttackSlotIndex,
+		bool bAllowOtherLane,
+		int32& OutWaitSlotIndex) const;
 	FVector ResolveCorridorRearDirection(const FVector& UnsignedAxis) const;
 	bool IsCorridorFormationActive() const;
 	int32 CalculateCorridorLaneCount(float CorridorWidth) const;
