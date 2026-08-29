@@ -225,6 +225,8 @@ private:
 	void PruneInvalidReservations();
 	void RefreshInitialFormationPhase();
 	void FinalizeInitialFormationAssignments();
+	void NotifyRequesterSlotChanged(AActor* Requester) const;
+	void NotifyAllReservedRequestersSlotChanged() const;
 	void RefreshPromotions();
 	bool PromoteBestWaitReservationToAttack();
 	bool PromoteOldestReservation(

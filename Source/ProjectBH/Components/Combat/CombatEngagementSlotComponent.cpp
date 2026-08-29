@@ -704,6 +704,34 @@ void UCombatEngagementSlotComponent::FinalizeInitialFormationAssignments()
 	}
 
 	++FormationRevision;
+	NotifyAllReservedRequestersSlotChanged();
+}
+
+void UCombatEngagementSlotComponent::NotifyRequesterSlotChanged(AActor* Requester) const
+{
+	const ABHEnemy* Enemy = Cast<ABHEnemy>(Requester);
+	if (ABHCrowdEnemyAIController* Controller = Enemy
+		? Cast<ABHCrowdEnemyAIController>(Enemy->GetController())
+		: nullptr)
+	{
+		Controller->NotifyCombatSlotAssignmentChanged();
+	}
+}
+
+void UCombatEngagementSlotComponent::NotifyAllReservedRequestersSlotChanged() const
+{
+	for (const TWeakObjectPtr<AActor>& Reservation : AttackReservations)
+	{
+		NotifyRequesterSlotChanged(Reservation.Get());
+	}
+	for (const TWeakObjectPtr<AActor>& Reservation : WaitReservations)
+	{
+		NotifyRequesterSlotChanged(Reservation.Get());
+	}
+	for (const TWeakObjectPtr<AActor>& Reservation : HoldingReservations)
+	{
+		NotifyRequesterSlotChanged(Reservation.Get());
+	}
 }
 
 void UCombatEngagementSlotComponent::RefreshPromotions()
@@ -741,6 +769,7 @@ bool UCombatEngagementSlotComponent::PromoteBestWaitReservationToAttack()
 
 	WaitReservations[WaitSlotIndex].Reset();
 	AttackReservations[AttackSlotIndex] = Requester;
+	NotifyRequesterSlotChanged(Requester);
 	UE_LOG(
 		LogProjectBH,
 		Display,
@@ -781,6 +810,7 @@ bool UCombatEngagementSlotComponent::PromoteOldestReservation(
 		SourceReservations[SourceIndex] = Requester;
 		return false;
 	}
+	NotifyRequesterSlotChanged(Requester);
 
 	UE_LOG(
 		LogProjectBH,
@@ -801,7 +831,13 @@ bool UCombatEngagementSlotComponent::AssignOldestPendingRequesterToHolding()
 		return false;
 	}
 
-	return TryReserveSlot(Requester, EBHCombatSlotType::Holding);
+	if (!TryReserveSlot(Requester, EBHCombatSlotType::Holding))
+	{
+		return false;
+	}
+
+	NotifyRequesterSlotChanged(Requester);
+	return true;
 }
 
 bool UCombatEngagementSlotComponent::FindOldestEligibleReservation(
@@ -1201,6 +1237,7 @@ void UCombatEngagementSlotComponent::ReformReservations()
 	ReformRingReservations(WaitReservations, EBHCombatSlotType::Wait);
 	ReformRingReservations(HoldingReservations, EBHCombatSlotType::Holding);
 	++FormationRevision;
+	NotifyAllReservedRequestersSlotChanged();
 
 	UE_LOG(
 		LogProjectBH,

@@ -148,6 +148,29 @@ void ABHCrowdEnemyAIController::ReleaseCombatSlot(EBHCombatSlotReleaseReason Rea
 	}
 }
 
+void ABHCrowdEnemyAIController::NotifyCombatSlotAssignmentChanged()
+{
+	if (!HasAuthority() || bSlotAssignmentRefreshQueued || !GetWorld())
+	{
+		return;
+	}
+
+	bSlotAssignmentRefreshQueued = true;
+	GetWorldTimerManager().SetTimerForNextTick(
+		this,
+		&ThisClass::RefreshAfterCombatSlotAssignmentChanged);
+}
+
+void ABHCrowdEnemyAIController::RefreshAfterCombatSlotAssignmentChanged()
+{
+	bSlotAssignmentRefreshQueued = false;
+	bHasRequestedSlotMove = false;
+	CurrentMoveRouteStage = EBHCombatMoveRouteStage::Direct;
+	LastRequestedRouteStage = EBHCombatMoveRouteStage::Direct;
+	ResetStuckTracking();
+	RefreshTargetAndMove();
+}
+
 void ABHCrowdEnemyAIController::RefreshTargetAndMove()
 {
 	ABHEnemy* ControlledEnemy = Cast<ABHEnemy>(GetPawn());
@@ -208,7 +231,8 @@ void ABHCrowdEnemyAIController::RefreshTargetAndMove()
 	else if (!bInEngagementFormation && DistanceToTarget <= FMath::Max(0.0f, EngagementEnterRadius))
 	{
 		bInEngagementFormation = true;
-		StopMovement();
+		// Preserve momentum while switching from Pursuit to Formation. The next
+		// MoveTo request replaces the goal without a visible stop-start step.
 		ResetPursuitTracking();
 	}
 
@@ -511,7 +535,8 @@ bool ABHCrowdEnemyAIController::AcquireCombatSlot(ABHEnemy* ControlledEnemy)
 		LastObservedFormationRevision = CurrentSlotComponent->GetFormationRevision();
 		++ReformCount;
 		bIsReforming = true;
-		StopMovement();
+		// A reform changes the destination, not the movement state. Keep current
+		// velocity and replace the path in this refresh instead of stopping first.
 		bHasRequestedSlotMove = false;
 		CurrentMoveRouteStage = EBHCombatMoveRouteStage::Direct;
 		LastRequestedRouteStage = EBHCombatMoveRouteStage::Direct;

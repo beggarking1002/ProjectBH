@@ -68,6 +68,9 @@ public:
 	/** Releases the current reservation immediately and optionally delays the next request. */
 	void ReleaseCombatSlot(EBHCombatSlotReleaseReason Reason, float ReacquireDelay = 0.0f);
 
+	/** Queues a next-frame path refresh after the central slot manager changes this enemy's assignment. */
+	void NotifyCombatSlotAssignmentChanged();
+
 protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI|Crowd")
 	bool bEnableCrowdObstacleAvoidance = true;
@@ -179,6 +182,7 @@ protected:
 private:
 	void ApplyCrowdFollowingSettings();
 	void RefreshTargetAndMove();
+	void RefreshAfterCombatSlotAssignmentChanged();
 	ABHHeroCharacter* SelectTargetHero() const;
 	bool IsHeroReachable(const ABHHeroCharacter* Hero) const;
 	bool AcquireCombatSlot(ABHEnemy* ControlledEnemy);
@@ -229,6 +233,7 @@ private:
 	bool bHasRequestedPursuitMove = false;
 	FVector LastRequestedPursuitLocation = FVector::ZeroVector;
 	float ResolvedTargetRefreshInterval = 0.5f;
+	bool bSlotAssignmentRefreshQueued = false;
 
 	FTimerHandle TargetRefreshTimerHandle;
 };
