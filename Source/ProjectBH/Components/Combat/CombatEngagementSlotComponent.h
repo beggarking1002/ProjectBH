@@ -26,6 +26,14 @@ enum class EBHCombatMoveRouteStage : uint8
 	Ingress
 };
 
+/** Coarse NavMesh space classification around the combat target. */
+UENUM(BlueprintType)
+enum class EBHCombatSpaceMode : uint8
+{
+	Open,
+	Corridor
+};
+
 /**
  * Server-authoritative reservation manager for combat positions around its owner.
  * Attack slots follow the owner directly, while outer formation rings may use a
@@ -103,6 +111,26 @@ public:
 
 	/** Initial candidates keep pursuing while this component gathers them for a fair assignment. */
 	bool IsInitialFormationPending() const { return bInitialFormationActive; }
+
+	/** Last stable NavMesh space classification. This is diagnostic only until formation rules consume it. */
+	UFUNCTION(BlueprintPure, Category = "Combat|Space Analysis")
+	EBHCombatSpaceMode GetCombatSpaceMode() const { return CurrentSpaceMode; }
+
+	/** True after at least one complete NavMesh probe sample. */
+	UFUNCTION(BlueprintPure, Category = "Combat|Space Analysis")
+	bool HasValidCombatSpaceAnalysis() const { return bHasValidSpaceAnalysis; }
+
+	/** Estimated traversable width perpendicular to the detected corridor axis. */
+	UFUNCTION(BlueprintPure, Category = "Combat|Space Analysis")
+	float GetEstimatedCorridorWidth() const { return EstimatedCorridorWidth; }
+
+	/** World-space horizontal direction of the longest local traversable axis. */
+	UFUNCTION(BlueprintPure, Category = "Combat|Space Analysis")
+	FVector GetEstimatedCorridorAxis() const { return EstimatedCorridorAxis; }
+
+	/** Attack slots currently usable by the active Open/Corridor formation. */
+	UFUNCTION(BlueprintPure, Category = "Combat|Space Analysis")
+	int32 GetActiveAttackSlotCount() const;
 
 protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Engagement Slots", meta = (ClampMin = "1", UIMin = "1"))
@@ -193,6 +221,86 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Engagement Slots", meta = (Units = "deg"))
 	float HoldingRingAngleOffset = 11.25f;
 
+	/** Enables diagnostic NavMesh sampling around the owner. It does not change slots or Enemy behavior yet. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Space Analysis")
+	bool bEnableCombatSpaceAnalysis = true;
+
+	/** Time between radial NavMesh samples. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Space Analysis", meta = (ClampMin = "0.05", Units = "s"))
+	float SpaceAnalysisInterval = 0.2f;
+
+	/** Radial probe count. Runtime rounds this up to a multiple of four. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Space Analysis", meta = (ClampMin = "8", ClampMax = "64", UIMin = "8", UIMax = "32"))
+	int32 SpaceProbeCount = 16;
+
+	/** Maximum NavMesh ray length in each probe direction. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Space Analysis", meta = (ClampMin = "100.0", Units = "cm"))
+	float SpaceProbeDistance = 500.0f;
+
+	/** Width at or below which an Open space may become a Corridor. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Space Analysis", meta = (ClampMin = "0.0", Units = "cm"))
+	float CorridorEnterMaxWidth = 350.0f;
+
+	/** Width at or above which a Corridor may return to Open. Must remain above the enter width. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Space Analysis", meta = (ClampMin = "0.0", Units = "cm"))
+	float CorridorExitMinWidth = 450.0f;
+
+	/** Minimum longest-axis length required before the local area can be treated as a corridor. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Space Analysis", meta = (ClampMin = "0.0", Units = "cm"))
+	float CorridorMinimumAxisLength = 600.0f;
+
+	/** Longest-axis / width ratio required to enter Corridor mode. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Space Analysis", meta = (ClampMin = "1.0"))
+	float CorridorEnterAspectRatio = 1.8f;
+
+	/** Ratio at or below which a Corridor may return to Open. Must remain below the enter ratio. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Space Analysis", meta = (ClampMin = "1.0"))
+	float CorridorExitAspectRatio = 1.4f;
+
+	/** Continuous Corridor evidence required before changing from Open. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Space Analysis", meta = (ClampMin = "0.0", Units = "s"))
+	float CorridorEnterDuration = 0.5f;
+
+	/** Continuous Open evidence required before changing from Corridor. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Space Analysis", meta = (ClampMin = "0.0", Units = "s"))
+	float CorridorExitDuration = 1.0f;
+
+	/** Converts ring slots to a rear-facing column while stable Corridor mode is active. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Corridor Formation")
+	bool bEnableCorridorFormation = true;
+
+	/** Conservative half-width reserved for each Enemy center against corridor walls. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Corridor Formation", meta = (ClampMin = "1.0", Units = "cm"))
+	float CorridorAgentRadius = 45.0f;
+
+	/** Minimum center-to-center spacing used by corridor lanes and the Attack arc. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Corridor Formation", meta = (ClampMin = "1.0", Units = "cm"))
+	float CorridorSlotSpacing = 95.0f;
+
+	/** Longitudinal distance between successive rows in the pursuit column. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Corridor Formation", meta = (ClampMin = "1.0", Units = "cm"))
+	float CorridorRowSpacing = 100.0f;
+
+	/** Empty longitudinal separation between Attack, Wait, Holding, and Pending layers. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Corridor Formation", meta = (ClampMin = "0.0", Units = "cm"))
+	float CorridorLayerGap = 100.0f;
+
+	/** Upper bound for side-by-side lanes regardless of measured width. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Corridor Formation", meta = (ClampMin = "1", ClampMax = "4", UIMin = "1", UIMax = "4"))
+	int32 CorridorMaximumLaneCount = 3;
+
+	/** Maximum half-angle used by the one-sided Attack arc in a corridor. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Corridor Formation", meta = (ClampMin = "0.0", ClampMax = "89.0", Units = "deg"))
+	float CorridorAttackArcHalfAngle = 70.0f;
+
+	/** Smoothing applied when the detected axis turns while remaining inside a corridor. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Corridor Formation", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float CorridorAxisFollowAlpha = 0.35f;
+
+	/** Notify every reserved Enemy after the smoothed corridor direction turns this far. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Corridor Formation", meta = (ClampMin = "1.0", ClampMax = "90.0", Units = "deg"))
+	float CorridorFormationRepathAngle = 15.0f;
+
 	/** A queued enemy must be this close to its current ring slot before central promotion. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Engagement Queue", meta = (ClampMin = "0.0", Units = "cm"))
 	float PromotionArrivalRadius = 60.0f;
@@ -221,6 +329,20 @@ protected:
 
 private:
 	void InitializeSlots();
+	void UpdateCombatSpaceAnalysis(float DeltaTime);
+	void AnalyzeCombatSpace(float SampleDeltaTime);
+	void HandleCombatSpaceModeChanged(EBHCombatSpaceMode PreviousMode);
+	void UpdateCorridorFormationDirection();
+	void RefreshCorridorFormationCapacity();
+	void ReconcileCorridorAttackReservations();
+	int32 GetLockedAttackReservationCount() const;
+	FVector ResolveCorridorRearDirection(const FVector& UnsignedAxis) const;
+	bool IsCorridorFormationActive() const;
+	int32 CalculateCorridorLaneCount(float CorridorWidth) const;
+	int32 CalculateCorridorAttackSlotCount(float CorridorWidth) const;
+	float GetCorridorLayerStartDistance(EBHCombatSlotType SlotType) const;
+	bool GetCorridorSlotWorldLocation(EBHCombatSlotType SlotType, int32 SlotIndex, FVector& OutWorldLocation) const;
+	bool GetCorridorPendingWorldLocation(int32 PendingIndex, FVector& OutWorldLocation) const;
 	void UpdateEngagementAnchor(float DeltaTime);
 	void PruneInvalidReservations();
 	void RefreshInitialFormationPhase();
@@ -271,6 +393,7 @@ private:
 	float CalculatePathCongestionPenalty(AActor* Requester, const TArray<FVector>& PathPoints) const;
 	void UpdateDebugMetrics();
 	void DrawDebugSlots() const;
+	void DrawCombatSpaceAnalysisDebug() const;
 
 	TArray<TWeakObjectPtr<AActor>> AttackReservations;
 	TArray<TWeakObjectPtr<AActor>> WaitReservations;
@@ -295,4 +418,23 @@ private:
 	int32 PeakSpacingViolationCount = 0;
 	int32 CurrentAttackingEnemyCount = 0;
 	int32 CurrentNonAttackSlotAttackerCount = 0;
+	EBHCombatSpaceMode CurrentSpaceMode = EBHCombatSpaceMode::Open;
+	EBHCombatSpaceMode CandidateSpaceMode = EBHCombatSpaceMode::Open;
+	bool bHasValidSpaceAnalysis = false;
+	float SpaceAnalysisElapsed = 0.0f;
+	float SpaceModeTransitionElapsed = 0.0f;
+	float EstimatedCorridorWidth = 0.0f;
+	float EstimatedCorridorAxisLength = 0.0f;
+	float EstimatedCorridorAspectRatio = 0.0f;
+	FVector EstimatedCorridorAxis = FVector::ForwardVector;
+	FVector CorridorFormationRearDirection = -FVector::ForwardVector;
+	FVector LastNotifiedCorridorDirection = -FVector::ForwardVector;
+	FVector SpaceProbeOrigin = FVector::ZeroVector;
+	int32 ActiveCorridorLaneCount = 1;
+	int32 ActiveCorridorAttackSlotCount = 1;
+	int32 DesiredCorridorAttackSlotCount = 1;
+	int32 CorridorAxisProbeIndex = INDEX_NONE;
+	int32 CorridorWidthProbeIndex = INDEX_NONE;
+	TArray<FVector> SpaceProbeEndpoints;
+	TArray<uint8> SpaceProbeBlocked;
 };

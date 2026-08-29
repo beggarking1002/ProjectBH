@@ -3,6 +3,7 @@
 #include "BHEnemyPoolManager.h"
 
 #include "BHEnemy.h"
+#include "../Debug/BHDebugDraw.h"
 #include "../ProjectBH.h"
 #include "DrawDebugHelpers.h"
 #include "Engine/TargetPoint.h"
@@ -83,7 +84,7 @@ void ABHEnemyPoolManager::Tick(float DeltaSeconds)
 	PruneInvalidEntries();
 	ReconcileRespawnDemand();
 	ProcessOneReadyRespawn();
-	if (bDrawPoolDebug)
+	if (BHDebugDraw::IsPoolEnabled(bDrawPoolDebug))
 	{
 		DrawPoolDebug();
 	}

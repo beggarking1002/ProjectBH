@@ -109,6 +109,10 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI|Pursuit", meta = (ClampMin = "0.0", Units = "cm"))
 	float EngagementExitRadius = 900.0f;
 
+	/** Keeps a valid distant corridor reservation inside formation range. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI|Pursuit", meta = (ClampMin = "0.0", Units = "cm"))
+	float ReservedSlotExitMargin = 150.0f;
+
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI|Movement Intent", meta = (ClampMin = "0.0", Units = "cm/s"))
 	float PursuitSpeed = 500.0f;
 

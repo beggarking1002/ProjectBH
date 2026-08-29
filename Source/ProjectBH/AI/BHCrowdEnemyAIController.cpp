@@ -4,6 +4,7 @@
 
 #include "../BHHeroCharacter.h"
 #include "../Components/Combat/CombatEngagementSlotComponent.h"
+#include "../Debug/BHDebugDraw.h"
 #include "../Enemies/BHEnemy.h"
 #include "../ProjectBH.h"
 #include "DrawDebugHelpers.h"
@@ -222,7 +223,31 @@ void ABHCrowdEnemyAIController::RefreshTargetAndMove()
 		ControlledEnemy->GetActorLocation(),
 		CurrentTarget->GetActorLocation());
 	LastDistanceToSlot = DistanceToTarget;
-	if (bInEngagementFormation && DistanceToTarget >= FMath::Max(EngagementEnterRadius, EngagementExitRadius))
+	float EffectiveEngagementExitRadius = FMath::Max(EngagementEnterRadius, EngagementExitRadius);
+	if (CurrentSlotComponent && CurrentSlotRequester.IsValid())
+	{
+		FVector ReservedLocation;
+		EBHCombatSlotType ReservedSlotType = CurrentSlotType;
+		int32 ReservedSlotIndex = CurrentSlotIndex;
+		const bool bHasReservedLocation = CurrentSlotType == EBHCombatSlotType::Pending
+			? CurrentSlotComponent->GetPendingWaitLocation(
+				CurrentSlotRequester.Get(),
+				ReservedSlotIndex,
+				ReservedLocation)
+			: CurrentSlotComponent->GetReservedSlot(
+				CurrentSlotRequester.Get(),
+				ReservedSlotType,
+				ReservedSlotIndex,
+				ReservedLocation);
+		if (bHasReservedLocation)
+		{
+			EffectiveEngagementExitRadius = FMath::Max(
+				EffectiveEngagementExitRadius,
+				FVector::Dist2D(ReservedLocation, CurrentTarget->GetActorLocation())
+					+ FMath::Max(0.0f, ReservedSlotExitMargin));
+		}
+	}
+	if (bInEngagementFormation && DistanceToTarget >= EffectiveEngagementExitRadius)
 	{
 		ReleaseCurrentCombatSlot(EBHCombatSlotReleaseReason::LeftEngagementRange);
 		bInEngagementFormation = false;
@@ -861,7 +886,7 @@ void ABHCrowdEnemyAIController::ResetStuckTracking()
 
 void ABHCrowdEnemyAIController::DrawDebugStatus(const ABHEnemy* ControlledEnemy) const
 {
-	if (!bDrawCrowdDebug || !ControlledEnemy || !GetWorld())
+	if (!BHDebugDraw::IsCrowdEnabled(bDrawCrowdDebug) || !ControlledEnemy || !GetWorld())
 	{
 		return;
 	}
