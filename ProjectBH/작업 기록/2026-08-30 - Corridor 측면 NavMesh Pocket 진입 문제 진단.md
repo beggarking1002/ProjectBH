@@ -1,6 +1,6 @@
 # Corridor 측면·NavMesh 공백·Pocket 진입 문제 진단
 
-> 2026-08-30 상태: 수정 우선순위 1번인 Pocket Attack 동적 수용량과 Attack 단일 Row는 구현 완료했다. 나머지 항목은 미구현이다.
+> 2026-08-30 상태: Pocket Attack 동적 수용량과 Corridor 중앙부 Side별 수용량을 유지한다. Corridor 변은 복잡한 Spillover 대신 Pocket으로 전환하도록 구현했다. 폭 축 Attack 후보와 Cross-Channel 승격 실험은 롤백했다.
 
 ## 확인한 현상
 
@@ -24,10 +24,10 @@
 
 - Corridor 양쪽의 실제 Navigation 여유 길이를 별도로 계산한다.
 - 각 Side의 Attack Slot을 생성한 뒤 `목표점 투영 성공`, `투영 오차`, `Player에서 목표점까지 Nav 경로`로 유효성을 검사한다.
-- 유효하지 않은 Side의 Slot 수를 열린 Side로 재분배한다.
-- 두 Side가 모두 유효할 때만 기존 Side 고정을 유지한다.
-- 한 Side의 유효 Attack 수가 0인 상태가 일정 시간 유지되면 해당 Side Queue의 선두를 열린 Side로 넘기는 `Blocked-Side Spillover`를 허용한다.
-- Spillover Enemy는 Combat Core를 직선으로 가로지르지 않고 열린 쪽 외곽 Waypoint를 경유한다.
+- Corridor 중앙에서는 기존 Side별 수용량과 Queue 규칙을 유지한다.
+- Player가 폭 축의 한쪽 변에 치우치면 해당 공간을 Pocket으로 전환한다.
+- 모든 반대 탐침 쌍에서 가장 비대칭인 경계를 찾는다. 가까운 거리 `100 cm 이하`, 반대쪽 여유 차이 `100 cm 이상`이면 Pocket으로 전환한다.
+- 해당 Pocket 유지 중에는 `130 cm 이하 / 여유 차이 60 cm 이상`의 완화 기준을 사용한다.
 
 ## 2. NavMesh 삼각형 공백
 
@@ -69,8 +69,8 @@
 ## 수정 우선순위
 
 1. Pocket Attack 동적 수용량과 Attack 다중 Row 금지 — **구현 완료**
-2. Corridor Side별 유효 수용량 계산
-3. 막힌 Corridor Side의 지연 Spillover와 우회 Waypoint
+2. Corridor 중앙부 Side별 유효 수용량 계산 — **구현 완료**
+3. Corridor 변의 Pocket 전환 — **구현 완료**
 4. NavMesh 삼각형 공백의 Collision 원인 확인 및 레벨 수정
 5. 선택 Enemy Crowd Debug로 Pocket 진입 실패가 예약·경로·군중 교착 중 어느 단계인지 검증
 

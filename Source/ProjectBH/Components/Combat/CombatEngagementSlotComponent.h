@@ -274,6 +274,26 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Space Analysis", meta = (ClampMin = "0.0", Units = "s"))
 	float CorridorExitDuration = 1.0f;
 
+	/** Distance from the player to the forward and rear cross-sections used to detect a corridor mouth. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Space Analysis", meta = (ClampMin = "50.0", Units = "cm"))
+	float CorridorMouthSampleDistance = 250.0f;
+
+	/** Maximum half-width inspected at each corridor-mouth cross-section. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Space Analysis", meta = (ClampMin = "100.0", Units = "cm"))
+	float CorridorMouthProbeHalfWidth = 350.0f;
+
+	/** A sampled cross-section must be at least this wide before it can describe an opening. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Space Analysis", meta = (ClampMin = "0.0", Units = "cm"))
+	float CorridorMouthMinimumOpenWidth = 500.0f;
+
+	/** Required sampled-width / local-width growth before the opening is treated as a mouth. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Space Analysis", meta = (ClampMin = "1.0"))
+	float CorridorMouthExpansionRatio = 1.4f;
+
+	/** Mouth evidence exits Corridor faster than the normal noisy-space hysteresis. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Space Analysis", meta = (ClampMin = "0.0", Units = "s"))
+	float CorridorMouthExitDuration = 0.3f;
+
 	/** Probe clearance required for a direction to belong to a broad Pocket opening. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Space Analysis", meta = (ClampMin = "100.0", Units = "cm"))
 	float PocketOpenProbeClearance = 350.0f;
@@ -298,6 +318,22 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Space Analysis", meta = (ClampMin = "0.0", ClampMax = "360.0", Units = "deg"))
 	float PocketExitMinimumOpenArc = 67.5f;
 
+	/** Enter a corridor-edge Pocket when an opposite probe pair has a boundary this close. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Space Analysis", meta = (ClampMin = "0.0", Units = "cm"))
+	float PocketCorridorEdgeEnterDistance = 100.0f;
+
+	/** Keep a corridor-edge Pocket until its nearby boundary is farther than this distance. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Space Analysis", meta = (ClampMin = "0.0", Units = "cm"))
+	float PocketCorridorEdgeExitDistance = 130.0f;
+
+	/** Required far-minus-near clearance when first entering a corridor-edge Pocket. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Space Analysis", meta = (ClampMin = "0.0", Units = "cm"))
+	float PocketCorridorEdgeEnterClearanceDifference = 100.0f;
+
+	/** Lower far-minus-near clearance retained while already in a corridor-edge Pocket. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Space Analysis", meta = (ClampMin = "0.0", Units = "cm"))
+	float PocketCorridorEdgeExitClearanceDifference = 60.0f;
+
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Space Analysis", meta = (ClampMin = "0.0", Units = "s"))
 	float PocketEnterDuration = 0.4f;
 
@@ -320,6 +356,22 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Corridor Formation", meta = (ClampMin = "1.0", Units = "cm"))
 	float CorridorRowSpacing = 100.0f;
 
+	/** Maximum lanes generated independently for each side-row from its measured NavMesh width. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Corridor Formation", meta = (ClampMin = "1", ClampMax = "8", UIMin = "1", UIMax = "4"))
+	int32 CorridorRowMaximumLaneCount = 4;
+
+	/** Maximum half-width inspected when building one dynamic Corridor row. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Corridor Formation", meta = (ClampMin = "100.0", Units = "cm"))
+	float CorridorRowProbeHalfWidth = 350.0f;
+
+	/** A changed row topology must remain stable this long before slot indices are repacked. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Corridor Formation", meta = (ClampMin = "0.0", Units = "s"))
+	float CorridorRowLayoutCommitDelay = 0.35f;
+
+	/** Maximum distance allowed between a dynamic row point and its NavMesh projection. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Corridor Formation", meta = (ClampMin = "0.0", Units = "cm"))
+	float CorridorRowProjectionTolerance = 35.0f;
+
 	/** Empty longitudinal separation between Attack, Wait, Holding, and Pending layers. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Corridor Formation", meta = (ClampMin = "0.0", Units = "cm"))
 	float CorridorLayerGap = 100.0f;
@@ -331,6 +383,14 @@ protected:
 	/** Maximum half-angle used by each side's Attack arc in a corridor. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Corridor Formation", meta = (ClampMin = "0.0", ClampMax = "89.0", Units = "deg"))
 	float CorridorAttackArcHalfAngle = 70.0f;
+
+	/** Maximum distance allowed between a desired Corridor Attack point and its NavMesh projection. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Corridor Formation", meta = (ClampMin = "0.0", Units = "cm"))
+	float CorridorAttackProjectionTolerance = 35.0f;
+
+	/** A changed side-capacity layout must remain stable this long before live reservations are rebuilt. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Corridor Formation", meta = (ClampMin = "0.0", Units = "s"))
+	float CorridorCapacityCommitDelay = 0.3f;
 
 	/** Smoothing applied when the detected axis turns while remaining inside a corridor. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Corridor Formation", meta = (ClampMin = "0.0", ClampMax = "1.0"))
@@ -387,13 +447,31 @@ protected:
 	bool bDrawDebugSlots = true;
 
 private:
+	struct FCorridorRowSlot
+	{
+		FVector WorldLocation = FVector::ZeroVector;
+		int32 SideIndex = INDEX_NONE;
+		int32 RowIndex = INDEX_NONE;
+		int32 LaneIndex = INDEX_NONE;
+		int32 LaneCount = 0;
+	};
+
 	void InitializeSlots();
 	void UpdateCombatSpaceAnalysis(float DeltaTime);
 	void AnalyzeCombatSpace(float SampleDeltaTime);
+	bool MeasureCorridorCrossSection(
+		const FVector& DesiredCenter,
+		const FVector& AxisDirection,
+		float ProbeHalfWidth,
+		float& OutWidth,
+		FVector& OutCenter,
+		FVector& OutSide0,
+		FVector& OutSide1) const;
 	void HandleCombatSpaceModeChanged(EBHCombatSpaceMode PreviousMode);
 	void UpdateCorridorFormationDirection();
 	void UpdatePocketFormationDirection();
-	void RefreshCorridorFormationCapacity();
+	void RefreshCorridorFormationCapacity(float DeltaTime);
+	void RefreshCorridorRowLayout(float DeltaTime);
 	void RefreshPocketFormationCapacity();
 	void ReconcileCorridorAttackReservations();
 	bool ReconcilePocketAttackReservations();
@@ -402,29 +480,40 @@ private:
 		EBHCombatSlotType SlotType,
 		bool bNotifyMovedRequesters);
 	void RepackAllCorridorQueueLayers(bool bNotifyMovedRequesters);
+	bool BuildCorridorRowLayouts(
+		TArray<FCorridorRowSlot>& OutWaitLayout,
+		TArray<FCorridorRowSlot>& OutHoldingLayout,
+		float& OutPendingStartDistance) const;
+	bool BuildCorridorLayerLayout(
+		EBHCombatSlotType SlotType,
+		float StartDistance,
+		int32 RequiredSlotCount,
+		TArray<FCorridorRowSlot>& OutLayout,
+		float& OutLastRowDistance) const;
+	bool BuildCorridorRowSlots(
+		int32 SideIndex,
+		int32 RowIndex,
+		float LongitudinalDistance,
+		TArray<FCorridorRowSlot>& OutRowSlots) const;
+	bool AreCorridorRowLayoutsEquivalent(
+		const TArray<FCorridorRowSlot>& LayoutA,
+		const TArray<FCorridorRowSlot>& LayoutB) const;
+	bool GetCorridorDynamicSlotWorldLocation(
+		EBHCombatSlotType SlotType,
+		int32 SlotIndex,
+		FVector& OutWorldLocation) const;
 	void AssignCorridorSideIndices(bool bResetExistingAssignments);
 	int32 GetLockedAttackReservationCount() const;
 	int32 GetCorridorLaneIndex(AActor* Requester) const;
 	int32 GetCorridorSideIndex(AActor* Requester) const;
 	int32 GetCorridorQueueChannelIndex(AActor* Requester) const;
-	int32 GetCorridorQueueChannelCount() const;
 	int32 GetCorridorAttackSlotSideIndex(int32 AttackSlotIndex) const;
 	int32 GetCorridorAttackSlotChannelIndex(int32 AttackSlotIndex) const;
-	bool HasFreeCorridorLaneSlot(
-		const TArray<TWeakObjectPtr<AActor>>& Reservations,
-		int32 LaneIndex) const;
-	bool FindCorridorLayerHead(
-		const TArray<TWeakObjectPtr<AActor>>& Reservations,
-		EBHCombatSlotType SlotType,
-		int32 LaneIndex,
-		bool bRequireArrival,
-		int32& OutSlotIndex) const;
-	bool FindCorridorPromotionCandidate(
-		const TArray<TWeakObjectPtr<AActor>>& SourceReservations,
-		EBHCombatSlotType SourceType,
-		const TArray<TWeakObjectPtr<AActor>>& DestinationReservations,
-		int32& OutSourceIndex) const;
-	bool FindCorridorPendingCandidateForHolding(AActor*& OutRequester) const;
+	bool ResolveCorridorAttackSlotLayout(
+		int32 AttackSlotIndex,
+		int32& OutSideIndex,
+		int32& OutSideLocalIndex,
+		int32& OutSideAttackCount) const;
 	bool FindCorridorWaitAdmissionForAttackSlot(
 		int32 AttackSlotIndex,
 		bool bAllowOtherLane,
@@ -434,8 +523,21 @@ private:
 	bool IsPocketFormationActive() const;
 	int32 CalculateCorridorLaneCount(float CorridorWidth) const;
 	int32 CalculateCorridorAttackSlotCount(float CorridorWidth) const;
+	bool CalculateCorridorAttackSideValidCounts(
+		int32 SideIndex,
+		int32 MaximumSideCapacity,
+		TArray<uint8>& OutValidCounts) const;
+	bool ResolveCorridorAttackCapacity(
+		int32& OutDesiredSide0,
+		int32& OutDesiredSide1,
+		int32& OutActiveSide0,
+		int32& OutActiveSide1) const;
+	bool GetCorridorAttackDesiredLocation(
+		int32 SideIndex,
+		int32 SideLocalIndex,
+		int32 SideAttackCount,
+		FVector& OutDesiredLocation) const;
 	int32 CalculatePocketAttackSlotCount() const;
-	float GetCorridorLayerStartDistance(EBHCombatSlotType SlotType) const;
 	bool GetCorridorSlotWorldLocation(EBHCombatSlotType SlotType, int32 SlotIndex, FVector& OutWorldLocation) const;
 	bool GetCorridorPendingWorldLocation(int32 PendingIndex, FVector& OutWorldLocation) const;
 	bool GetPocketSlotWorldLocation(EBHCombatSlotType SlotType, int32 SlotIndex, FVector& OutWorldLocation) const;
@@ -531,6 +633,20 @@ private:
 	float EstimatedCorridorWidth = 0.0f;
 	float EstimatedCorridorAxisLength = 0.0f;
 	float EstimatedCorridorAspectRatio = 0.0f;
+	float EstimatedCorridorEdgeNearDistance = 0.0f;
+	float EstimatedCorridorEdgeClearanceDifference = 0.0f;
+	bool bCorridorEdgePocketActive = false;
+	bool bCorridorMouthDetected = false;
+	bool bCorridorForwardCrossSectionValid = false;
+	bool bCorridorRearCrossSectionValid = false;
+	float EstimatedCorridorForwardWidth = 0.0f;
+	float EstimatedCorridorRearWidth = 0.0f;
+	FVector CorridorForwardCrossSectionCenter = FVector::ZeroVector;
+	FVector CorridorForwardCrossSectionSide0 = FVector::ZeroVector;
+	FVector CorridorForwardCrossSectionSide1 = FVector::ZeroVector;
+	FVector CorridorRearCrossSectionCenter = FVector::ZeroVector;
+	FVector CorridorRearCrossSectionSide0 = FVector::ZeroVector;
+	FVector CorridorRearCrossSectionSide1 = FVector::ZeroVector;
 	FVector EstimatedCorridorAxis = FVector::ForwardVector;
 	float EstimatedPocketOpenArc = 0.0f;
 	float EstimatedPocketBlockedFraction = 0.0f;
@@ -543,6 +659,20 @@ private:
 	int32 ActiveCorridorLaneCount = 1;
 	int32 ActiveCorridorAttackSlotCount = 1;
 	int32 DesiredCorridorAttackSlotCount = 1;
+	int32 ActiveCorridorSide0AttackSlotCount = 1;
+	int32 ActiveCorridorSide1AttackSlotCount = 0;
+	int32 DesiredCorridorSide0AttackSlotCount = 1;
+	int32 DesiredCorridorSide1AttackSlotCount = 0;
+	int32 PendingCorridorSide0AttackSlotCount = 1;
+	int32 PendingCorridorSide1AttackSlotCount = 0;
+	float PendingCorridorCapacityElapsed = 0.0f;
+	TArray<FCorridorRowSlot> CorridorWaitRowLayout;
+	TArray<FCorridorRowSlot> CorridorHoldingRowLayout;
+	TArray<FCorridorRowSlot> PendingCorridorWaitRowLayout;
+	TArray<FCorridorRowSlot> PendingCorridorHoldingRowLayout;
+	float CorridorPendingRowStartDistance = 0.0f;
+	float PendingCorridorRowStartDistance = 0.0f;
+	float PendingCorridorRowLayoutElapsed = 0.0f;
 	int32 ActivePocketAttackSlotCount = 1;
 	int32 DesiredPocketAttackSlotCount = 1;
 	int32 CorridorAxisProbeIndex = INDEX_NONE;
