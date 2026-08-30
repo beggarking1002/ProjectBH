@@ -23,7 +23,9 @@ enum class EBHCombatMoveRouteStage : uint8
 	Direct,
 	ApproachRing,
 	AlignOnRing,
-	Ingress
+	Ingress,
+	BypassCorePositive,
+	BypassCoreNegative
 };
 
 /** Coarse NavMesh space classification around the combat target. */
@@ -192,6 +194,14 @@ protected:
 	/** Angular tolerance before an Enemy may leave an outer ring and enter its inner reserved slot. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Approach Routing", meta = (ClampMin = "0.1", ClampMax = "15.0", Units = "deg"))
 	float RingIngressAngleTolerance = 10.0f;
+
+	/** Extra distance kept between the dynamic Corridor bypass ring and the Combat Core. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Approach Routing", meta = (ClampMin = "0.0", Units = "cm"))
+	float CombatCoreBypassPadding = 45.0f;
+
+	/** Maximum 2D NavMesh projection offset accepted for a dynamic Corridor bypass waypoint. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Approach Routing", meta = (ClampMin = "0.0", Units = "cm"))
+	float CombatCoreBypassProjectionTolerance = 35.0f;
 
 	/** Wait/Holding centers do not mirror every small player movement. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Engagement Anchor", meta = (ClampMin = "0.0", Units = "cm"))
@@ -380,9 +390,17 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Corridor Formation", meta = (ClampMin = "1", ClampMax = "4", UIMin = "1", UIMax = "4"))
 	int32 CorridorMaximumLaneCount = 2;
 
-	/** Maximum half-angle used by each side's Attack arc in a corridor. */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Corridor Formation", meta = (ClampMin = "0.0", ClampMax = "89.0", Units = "deg"))
-	float CorridorAttackArcHalfAngle = 70.0f;
+	/** Number of evenly spaced 360-degree Attack positions inspected around the player. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Corridor Formation", meta = (ClampMin = "8", ClampMax = "32"))
+	int32 CorridorAttackCandidateCount = 16;
+
+	/** Minimum center-to-center distance retained between selected Corridor Attack candidates. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Corridor Formation", meta = (ClampMin = "1.0", Units = "cm"))
+	float CorridorAttackMinimumSpacing = 90.0f;
+
+	/** Number of radial NavMesh clearance rays tested around each Attack candidate. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Corridor Formation", meta = (ClampMin = "4", ClampMax = "16"))
+	int32 CorridorAttackClearanceProbeCount = 8;
 
 	/** Maximum distance allowed between a desired Corridor Attack point and its NavMesh projection. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Corridor Formation", meta = (ClampMin = "0.0", Units = "cm"))
@@ -447,6 +465,14 @@ protected:
 	bool bDrawDebugSlots = true;
 
 private:
+	struct FCorridorAttackSlot
+	{
+		FVector WorldLocation = FVector::ZeroVector;
+		int32 SampleIndex = INDEX_NONE;
+		int32 SideIndex = INDEX_NONE;
+		float AxisAlignment = 0.0f;
+	};
+
 	struct FCorridorRowSlot
 	{
 		FVector WorldLocation = FVector::ZeroVector;
@@ -509,34 +535,29 @@ private:
 	int32 GetCorridorQueueChannelIndex(AActor* Requester) const;
 	int32 GetCorridorAttackSlotSideIndex(int32 AttackSlotIndex) const;
 	int32 GetCorridorAttackSlotChannelIndex(int32 AttackSlotIndex) const;
-	bool ResolveCorridorAttackSlotLayout(
-		int32 AttackSlotIndex,
-		int32& OutSideIndex,
-		int32& OutSideLocalIndex,
-		int32& OutSideAttackCount) const;
+	void UpdateCorridorSideForAttackReservation(AActor* Requester, int32 AttackSlotIndex);
 	bool FindCorridorWaitAdmissionForAttackSlot(
 		int32 AttackSlotIndex,
-		bool bAllowOtherLane,
+		bool bAllowOtherSide,
 		int32& OutWaitSlotIndex) const;
 	FVector ResolveCorridorRearDirection(const FVector& UnsignedAxis) const;
 	bool IsCorridorFormationActive() const;
 	bool IsPocketFormationActive() const;
 	int32 CalculateCorridorLaneCount(float CorridorWidth) const;
-	int32 CalculateCorridorAttackSlotCount(float CorridorWidth) const;
-	bool CalculateCorridorAttackSideValidCounts(
-		int32 SideIndex,
-		int32 MaximumSideCapacity,
-		TArray<uint8>& OutValidCounts) const;
-	bool ResolveCorridorAttackCapacity(
-		int32& OutDesiredSide0,
-		int32& OutDesiredSide1,
-		int32& OutActiveSide0,
-		int32& OutActiveSide1) const;
-	bool GetCorridorAttackDesiredLocation(
-		int32 SideIndex,
-		int32 SideLocalIndex,
-		int32 SideAttackCount,
-		FVector& OutDesiredLocation) const;
+	bool BuildCorridorAttackCandidateLayout(TArray<FCorridorAttackSlot>& OutLayout);
+	bool GetCorridorAttackCandidateDesiredLocation(
+		int32 SampleIndex,
+		FVector& OutDesiredLocation,
+		FVector& OutDirection) const;
+	bool HasCorridorAttackCandidateClearance(
+		const FVector& CandidateLocation) const;
+	bool AreCorridorAttackLayoutsEquivalent(
+		const TArray<FCorridorAttackSlot>& LayoutA,
+		const TArray<FCorridorAttackSlot>& LayoutB) const;
+	void RefreshCorridorAttackLayoutWorldLocations(
+		TArray<FCorridorAttackSlot>& Layout) const;
+	void CommitCorridorAttackLayout(TArray<FCorridorAttackSlot>&& NewLayout);
+	void RefreshCorridorAttackSideCounts();
 	int32 CalculatePocketAttackSlotCount() const;
 	bool GetCorridorSlotWorldLocation(EBHCombatSlotType SlotType, int32 SlotIndex, FVector& OutWorldLocation) const;
 	bool GetCorridorPendingWorldLocation(int32 PendingIndex, FVector& OutWorldLocation) const;
@@ -593,9 +614,25 @@ private:
 	bool FindReservation(const TArray<TWeakObjectPtr<AActor>>& Reservations, AActor* Requester, int32& OutSlotIndex) const;
 	bool GetSlotWorldLocation(EBHCombatSlotType SlotType, int32 SlotIndex, FVector& OutWorldLocation) const;
 	bool DoesSegmentCrossCombatCore(const FVector& SegmentStart, const FVector& SegmentEnd) const;
+	bool DoesSegmentCrossCombatRadius(
+		const FVector& SegmentStart,
+		const FVector& SegmentEnd,
+		float Radius) const;
 	float GetEffectiveCombatCoreRadius() const;
+	bool ResolveCorridorCombatCoreBypassGoal(
+		AActor* Requester,
+		const FVector& FinalSlotLocation,
+		EBHCombatMoveRouteStage PreviousRouteStage,
+		FVector& OutMoveGoal,
+		EBHCombatMoveRouteStage& OutRouteStage) const;
 	bool ProjectToNavigation(const FVector& DesiredLocation, FVector& OutProjectedLocation) const;
 	bool GetNavigationPathScore(AActor* Requester, const FVector& Destination, float& OutPathScore) const;
+	bool GetNavigationPathScoreBetween(
+		AActor* Requester,
+		const FVector& Start,
+		const FVector& Destination,
+		float& OutPathScore,
+		bool bRejectCombatCoreCrossing = false) const;
 	float CalculatePathCongestionPenalty(AActor* Requester, const TArray<FVector>& PathPoints) const;
 	void UpdateDebugMetrics();
 	void DrawDebugSlots() const;
@@ -663,9 +700,12 @@ private:
 	int32 ActiveCorridorSide1AttackSlotCount = 0;
 	int32 DesiredCorridorSide0AttackSlotCount = 1;
 	int32 DesiredCorridorSide1AttackSlotCount = 0;
-	int32 PendingCorridorSide0AttackSlotCount = 1;
-	int32 PendingCorridorSide1AttackSlotCount = 0;
+	TArray<FCorridorAttackSlot> ActiveCorridorAttackLayout;
+	TArray<FCorridorAttackSlot> PendingCorridorAttackLayout;
 	float PendingCorridorCapacityElapsed = 0.0f;
+	TArray<FVector> CorridorAttackProbeLocations;
+	TArray<uint8> CorridorAttackProbeValid;
+	TArray<uint8> CorridorAttackProbeSelected;
 	TArray<FCorridorRowSlot> CorridorWaitRowLayout;
 	TArray<FCorridorRowSlot> CorridorHoldingRowLayout;
 	TArray<FCorridorRowSlot> PendingCorridorWaitRowLayout;

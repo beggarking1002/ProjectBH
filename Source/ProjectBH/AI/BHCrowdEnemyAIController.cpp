@@ -432,7 +432,9 @@ void ABHCrowdEnemyAIController::RefreshTargetAndMove()
 	if (bTargetChanged || bRouteStageChanged || bSlotMoved || GetMoveStatus() != EPathFollowingStatus::Moving)
 	{
 		const bool bUsesRingWaypoint = CurrentMoveRouteStage == EBHCombatMoveRouteStage::ApproachRing
-			|| CurrentMoveRouteStage == EBHCombatMoveRouteStage::AlignOnRing;
+			|| CurrentMoveRouteStage == EBHCombatMoveRouteStage::AlignOnRing
+			|| CurrentMoveRouteStage == EBHCombatMoveRouteStage::BypassCorePositive
+			|| CurrentMoveRouteStage == EBHCombatMoveRouteStage::BypassCoreNegative;
 		RequestMoveToReservedSlot(
 			MoveGoal,
 			bUsesRingWaypoint ? RingWaypointAcceptanceRadius : SlotAcceptanceRadius);
@@ -923,6 +925,12 @@ void ABHCrowdEnemyAIController::DrawDebugStatus(const ABHEnemy* ControlledEnemy)
 		break;
 	case EBHCombatMoveRouteStage::Ingress:
 		RouteColor = FColor::Orange;
+		break;
+	case EBHCombatMoveRouteStage::BypassCorePositive:
+		RouteColor = FColor::Magenta;
+		break;
+	case EBHCombatMoveRouteStage::BypassCoreNegative:
+		RouteColor = FColor(160, 80, 255);
 		break;
 	case EBHCombatMoveRouteStage::Direct:
 	default:
