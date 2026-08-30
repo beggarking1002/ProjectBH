@@ -1,5 +1,7 @@
 # Corridor Lane Queue 규칙 구현
 
+> 2026-08-30부터 Corridor는 양쪽 `Side × Lane` Queue를 사용한다. 현행 규칙은 [[2026-08-30 - Attack Slot 5개 및 양방향 Corridor 구현]]을 따른다.
+
 ## 목표
 
 좁은 통로 선형 대형을 단순한 Slot 모양이 아니라 실제 줄서기 규칙으로 완성한다. 같은 Lane의 후발 Enemy가 선두를 건너뛰어 Attack으로 승격하거나, 빈자리를 찾아 옆 Lane으로 이동하며 교착을 만드는 것을 막는다.

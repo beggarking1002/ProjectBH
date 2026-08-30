@@ -42,6 +42,9 @@ Plugins/
 Thumbs.db
 Desktop.ini
 
+# Temporary working directories
+.tmp/
+
 # Obsidian personal workspace state (keep Markdown documentation tracked)
 ProjectBH/.obsidian/cache/
 ProjectBH/.obsidian/workspace.json

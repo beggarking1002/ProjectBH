@@ -1,0 +1,553 @@
+{"kind":"deck","id":"pr/hijk0o","name":"Deck"}
+{"kind":"layout","layoutId":"2b7ebf43-251f-4c5f-8496-4a4b91032f11","name":"Master","type":"master"}
+{"kind":"layout","layoutId":"c09e3aef-41bd-4964-8ba2-47517f519958","name":"Title Slide","type":"title"}
+{"kind":"slide","id":"sl/d4pwcu","slide":1,"title":"SYSTEM DESIGN + UE5 C++","textShapes":9}
+{"kind":"shape","id":"sh/d8zexwra","slide":1,"bbox":[64,52,220,30]}
+{"kind":"textbox","id":"sh/qlov2hsz","slide":1,"text":"SYSTEM DESIGN + UE5 C++","textPreview":"SYSTEM DESIGN + UE5 C++","textChars":23,"textLines":1,"bbox":[64,53,220,27]}
+{"kind":"textbox","id":"sh/rmhwvm9k","slide":1,"text":"몬스터 떼,\n어떻게 행동할 것인가?","textPreview":"몬스터 떼, | 어떻게 행동할 것인가?","textChars":19,"textLines":2,"bbox":[64,126,660,180]}
+{"kind":"textbox","id":"sh/0bqx8ra1","slide":1,"text":"공간을 읽고, 자리를 예약하고,\n혼잡 속에서도 전투 대형을 유지하는 군중 AI","textPreview":"공간을 읽고, 자리를 예약하고, | 혼잡 속에서도 전투 대형을 유지하는 군중 AI","textChars":43,"textLines":2,"bbox":[66,324,600,82]}
+{"kind":"textbox","id":"sh/1cze1wrm","slide":1,"text":"PROJECT BH · MONSTER MOVEMENT SYSTEM","textPreview":"PROJECT BH · MONSTER MOVEMENT SYSTEM","textChars":36,"textLines":1,"bbox":[66,610,520,24]}
+{"kind":"textbox","id":"sh/e98f6hsv","slide":1,"text":"PORTFOLIO DRAFT · 2026.08","textPreview":"PORTFOLIO DRAFT · 2026.08","textChars":25,"textLines":1,"bbox":[66,642,420,20]}
+{"kind":"shape","id":"sh/fahwzm9g","slide":1,"bbox":[748,52,468,610]}
+{"kind":"shape","id":"sh/gf6dw7ax","slide":1,"bbox":[802,164,360,360]}
+{"kind":"shape","id":"sh/hgfepcr2","slide":1,"bbox":[852,214,260,260]}
+{"kind":"shape","id":"sh/lw7y1wj2","slide":1,"bbox":[902,264,160,160]}
+{"kind":"shape","id":"sh/0vyxsrih","slide":1,"bbox":[953,315,58,58]}
+{"kind":"textbox","id":"sh/zupgzm1w","slide":1,"text":"P","textPreview":"P","textChars":1,"textLines":1,"bbox":[962,328,40,32]}
+{"kind":"shape","id":"sh/etgfqh0r","slide":1,"bbox":[973,255,18,18]}
+{"kind":"shape","id":"sh/907y5wje","slide":1,"bbox":[1049.08,310.28,18,18]}
+{"kind":"shape","id":"sh/8zyxwrit","slide":1,"bbox":[1020.02,399.72,18,18]}
+{"kind":"shape","id":"sh/nypg3m18","slide":1,"bbox":[925.98,399.72,18,18]}
+{"kind":"shape","id":"sh/mxgfu10n","slide":1,"bbox":[896.92,310.28,18,18]}
+{"kind":"shape","id":"sh/xory9gza","slide":1,"bbox":[994.43,208.46,14,14]}
+{"kind":"shape","id":"sh/wnix0bip","slide":1,"bbox":[1079.63,259.85,14,14]}
+{"kind":"shape","id":"sh/gja9sjud","slide":1,"bbox":[1103.54,356.43,14,14]}
+{"kind":"shape","id":"sh/hkjql4bi","slide":1,"bbox":[1052.15,441.63,14,14]}
+{"kind":"shape","id":"sh/uh8rq9c7","slide":1,"bbox":[955.57,465.54,14,14]}
+{"kind":"shape","id":"sh/fi18jets","slide":1,"bbox":[870.37,414.15,14,14]}
+{"kind":"shape","id":"sh/47a9wju9","slide":1,"bbox":[846.46,317.57,14,14]}
+{"kind":"shape","id":"sh/p8jqpobu","slide":1,"bbox":[897.85,232.37,14,14]}
+{"kind":"shape","id":"sh/25sru9c3","slide":1,"bbox":[1028.19,165.04,14,14]}
+{"kind":"shape","id":"sh/3618neto","slide":1,"bbox":[1107.05,214.67,14,14]}
+{"kind":"shape","id":"sh/kbq9kzu5","slide":1,"bbox":[1150.52,297.09,14,14]}
+{"kind":"shape","id":"sh/5czqdkbq","slide":1,"bbox":[1146.96,390.19,14,14]}
+{"kind":"shape","id":"sh/n65cj2d8","slide":1,"bbox":[1097.33,469.05,14,14]}
+{"kind":"shape","id":"sh/m5wbqxwn","slide":1,"bbox":[1014.91,512.52,14,14]}
+{"kind":"shape","id":"sh/98nulsvy","slide":1,"bbox":[921.81,508.96,14,14]}
+{"kind":"shape","id":"sh/o7ets7ed","slide":1,"bbox":[842.95,459.33,14,14]}
+{"kind":"shape","id":"sh/z25cfidw","slide":1,"bbox":[799.48,376.91,14,14]}
+{"kind":"shape","id":"sh/e1wbmdwb","slide":1,"bbox":[803.04,283.81,14,14]}
+{"kind":"shape","id":"sh/14nuhsv2","slide":1,"bbox":[852.67,204.95,14,14]}
+{"kind":"shape","id":"sh/03etoneh","slide":1,"bbox":[935.09,161.48,14,14]}
+{"kind":"shape","id":"sh/relcbid0","slide":1,"bbox":[848,565,100,30]}
+{"kind":"textbox","id":"sh/qdcbidwf","slide":1,"text":"5 ATTACK","textPreview":"5 ATTACK","textChars":8,"textLines":1,"bbox":[848,566,100,27]}
+{"kind":"shape","id":"sh/6lwfm1sz","slide":1,"bbox":[956,565,90,30]}
+{"kind":"textbox","id":"sh/rm5gv69k","slide":1,"text":"8 WAIT","textPreview":"8 WAIT","textChars":6,"textLines":1,"bbox":[956,566,90,27]}
+{"kind":"shape","id":"sh/s7yxoba5","slide":1,"bbox":[1054,565,102,30]}
+{"kind":"textbox","id":"sh/t87yxgrq","slide":1,"text":"16 HOLD","textPreview":"16 HOLD","textChars":7,"textLines":1,"bbox":[1054,566,102,27]}
+{"kind":"notes","id":"nt/d4pwcu","slide":1,"text":"[Sources]\n- Local design SSOT: C:/UE5/ProjectBH/ProjectBH/기획/몬스터 이동 시스템 규칙.md\n- Local implementation: C:/UE5/ProjectBH/Source/ProjectBH/Components/Combat/CombatEngagementSlotComponent.h\n[/Sources]"}
+{"kind":"slide","id":"sl/yg9the","slide":2,"title":"01 · PROBLEM","textShapes":19}
+{"kind":"textbox","id":"sh/8zal0vu5","slide":2,"text":"01 · PROBLEM","textPreview":"01 · PROBLEM","textChars":12,"textLines":1,"bbox":[64,36,420,22]}
+{"kind":"textbox","id":"sh/7y1krqdk","slide":2,"text":"MoveTo만으로는 ‘떼’가 되지 않는다","textPreview":"MoveTo만으로는 ‘떼’가 되지 않는다","textChars":22,"textLines":1,"bbox":[64,70,1110,64]}
+{"kind":"textbox","id":"sh/6xs3ylcz","slide":2,"text":"한 명씩 쫓는 AI를 넘어, 집단이 전투 공간을 사용하는 규칙이 필요했다.","textPreview":"한 명씩 쫓는 AI를 넘어, 집단이 전투 공간을 사용하는 규칙이 필요했다.","textChars":41,"textLines":1,"bbox":[64,132,1080,34]}
+{"kind":"shape","id":"sh/lwj2pgvu","slide":2,"bbox":[64,174,1152,0]}
+{"kind":"shape","id":"sh/kbalwbu9","slide":2,"bbox":[64,220,340,310]}
+{"kind":"shape","id":"sh/ja1kn6do","slide":2,"bbox":[91,243,54,54]}
+{"kind":"textbox","id":"sh/y9sju1c3","slide":2,"text":"01","textPreview":"01","textChars":2,"textLines":1,"bbox":[95,253,46,34]}
+{"kind":"textbox","id":"sh/5sn210by","slide":2,"text":"저돌성","textPreview":"저돌성","textChars":3,"textLines":1,"bbox":[94,320,280,38]}
+{"kind":"textbox","id":"sh/4rul8fud","slide":2,"text":"플레이어를 향해 빠르게 몰려오되\n도착 전에 눈치를 보는 인상을 없앤다.","textPreview":"플레이어를 향해 빠르게 몰려오되 | 도착 전에 눈치를 보는 인상을 없앤다.","textChars":39,"textLines":2,"bbox":[94,378,280,82]}
+{"kind":"shape","id":"sh/edonyhgf","slide":2,"bbox":[94,482,280,0]}
+{"kind":"textbox","id":"sh/feho7mh0","slide":2,"text":"추격 속도·초기 돌진","textPreview":"추격 속도·초기 돌진","textChars":11,"textLines":1,"bbox":[94,496,280,24]}
+{"kind":"shape","id":"sh/0fq50ry5","slide":2,"bbox":[438,220,340,310]}
+{"kind":"shape","id":"sh/1gz69czq","slide":2,"bbox":[465,243,54,54]}
+{"kind":"textbox","id":"sh/qponuxg3","slide":2,"text":"02","textPreview":"02","textChars":2,"textLines":1,"bbox":[469,253,46,34]}
+{"kind":"textbox","id":"sh/rqx432ho","slide":2,"text":"공간 존중","textPreview":"공간 존중","textChars":5,"textLines":1,"bbox":[468,320,280,38]}
+{"kind":"textbox","id":"sh/sb65w7y9","slide":2,"text":"동일 좌표로 수렴하지 않고\n공격·대기 자리를 명시적으로 나눈다.","textPreview":"동일 좌표로 수렴하지 않고 | 공격·대기 자리를 명시적으로 나눈다.","textChars":35,"textLines":2,"bbox":[468,378,280,82]}
+{"kind":"shape","id":"sh/dcf65czu","slide":2,"bbox":[468,482,280,0]}
+{"kind":"textbox","id":"sh/al8n61gn","slide":2,"text":"Slot·Queue·Crowd","textPreview":"Slot·Queue·Crowd","textChars":16,"textLines":1,"bbox":[468,496,280,24]}
+{"kind":"shape","id":"sh/b61of6xs","slide":2,"bbox":[812,220,340,310]}
+{"kind":"shape","id":"sh/7qtk7yxk","slide":2,"bbox":[839,243,54,54]}
+{"kind":"textbox","id":"sh/6pk3ytwz","slide":2,"text":"03","textPreview":"03","textChars":2,"textLines":1,"bbox":[843,253,46,34]}
+{"kind":"textbox","id":"sh/tsb298fa","slide":2,"text":"환경 적응","textPreview":"환경 적응","textChars":5,"textLines":1,"bbox":[842,320,280,38]}
+{"kind":"textbox","id":"sh/8r2l03e5","slide":2,"text":"광장·통로·구석에서 같은 원형\n대형을 강요하지 않는다.","textPreview":"광장·통로·구석에서 같은 원형 | 대형을 강요하지 않는다.","textChars":30,"textLines":2,"bbox":[842,378,280,82]}
+{"kind":"shape","id":"sh/vutkbyxg","slide":2,"bbox":[842,482,280,0]}
+{"kind":"textbox","id":"sh/utk32twv","slide":2,"text":"공간 분석·대형 전환","textPreview":"공간 분석·대형 전환","textChars":11,"textLines":1,"bbox":[842,496,280,24]}
+{"kind":"shape","id":"sh/hwv2d8fm","slide":2,"bbox":[64,558,1088,78]}
+{"kind":"textbox","id":"sh/gvml43e1","slide":2,"text":"설계 질문","textPreview":"설계 질문","textChars":5,"textLines":1,"bbox":[92,580,120,28]}
+{"kind":"textbox","id":"sh/3idkfixs","slide":2,"text":"“누가 어디로, 언제 이동하고, 실패하면 어떻게 복구할 것인가?”","textPreview":"“누가 어디로, 언제 이동하고, 실패하면 어떻게 복구할 것인가?”","textChars":36,"textLines":1,"bbox":[220,574,880,38]}
+{"kind":"textbox","id":"sh/ih436dw7","slide":2,"text":"PROJECT BH · MONSTER MOVEMENT SYSTEM","textPreview":"PROJECT BH · MONSTER MOVEMENT SYSTEM","textChars":36,"textLines":1,"bbox":[64,684,600,16]}
+{"kind":"textbox","id":"sh/0n61wnu5","slide":2,"text":"02","textPreview":"02","textChars":2,"textLines":1,"bbox":[1150,682,64,18]}
+{"kind":"notes","id":"nt/yg9the","slide":2,"text":"[Sources]\n- C:/UE5/ProjectBH/ProjectBH/기획/몬스터 이동 시스템 규칙.md — §3 기본 원칙, §7 전투 상태와 이동 허용\n[/Sources]"}
+{"kind":"slide","id":"sl/48w07o","slide":3,"title":"02 · ARCHITECTURE","textShapes":21}
+{"kind":"textbox","id":"sh/tczqt4jy","slide":3,"text":"02 · ARCHITECTURE","textPreview":"02 · ARCHITECTURE","textChars":17,"textLines":1,"bbox":[64,36,420,22]}
+{"kind":"textbox","id":"sh/6p87y9kn","slide":3,"text":"내장 내비게이션 위에 행동 규칙을 설계했다","textPreview":"내장 내비게이션 위에 행동 규칙을 설계했다","textChars":23,"textLines":1,"bbox":[64,70,1110,64]}
+{"kind":"textbox","id":"sh/7qh8re18","slide":3,"text":"NavMesh는 길을 찾고, 커스텀 시스템은 목적지·순서·복구를 결정한다.","textPreview":"NavMesh는 길을 찾고, 커스텀 시스템은 목적지·순서·복구를 결정한다.","textChars":41,"textLines":1,"bbox":[64,132,1080,34]}
+{"kind":"shape","id":"sh/knqpwz2h","slide":3,"bbox":[64,174,1152,0]}
+{"kind":"shape","id":"sh/5ozqp4j2","slide":3,"bbox":[64,230,250,188]}
+{"kind":"textbox","id":"sh/ilo7upkb","slide":3,"text":"UE NAVMESH","textPreview":"UE NAVMESH","textChars":10,"textLines":1,"bbox":[88,254,202,26]}
+{"kind":"textbox","id":"sh/jmx8nu1w","slide":3,"text":"경로 탐색\n도달 가능성\nNavMesh 투영","textPreview":"경로 탐색 | 도달 가능성 | NavMesh 투영","textChars":23,"textLines":3,"bbox":[88,298,202,92]}
+{"kind":"shape","id":"sh/wj6psz2l","slide":3,"bbox":[342,230,250,188]}
+{"kind":"textbox","id":"sh/xkf6lkj6","slide":3,"text":"DETOUR CROWD","textPreview":"DETOUR CROWD","textChars":12,"textLines":1,"bbox":[366,254,202,26]}
+{"kind":"textbox","id":"sh/dgn2dsri","slide":3,"text":"근거리 회피\nSeparation\n속도 조향","textPreview":"근거리 회피 | Separation | 속도 조향","textChars":23,"textLines":3,"bbox":[366,298,202,92]}
+{"kind":"shape","id":"sh/cfe14nad","slide":3,"bbox":[620,230,532,188]}
+{"kind":"textbox","id":"sh/re5kbits","slide":3,"text":"CUSTOM ENGAGEMENT SYSTEM","textPreview":"CUSTOM ENGAGEMENT SYSTEM","textChars":24,"textLines":1,"bbox":[644,254,484,26]}
+{"kind":"textbox","id":"sh/qdwj2ds7","slide":3,"text":"Slot 예약 · 중앙 Queue · 공간 분석 · 승격 · 교착 복구 · Object Pool","textPreview":"Slot 예약 · 중앙 Queue · 공간 분석 · 승격 · 교착 복구 · Object Pool","textChars":53,"textLines":1,"bbox":[644,298,484,92]}
+{"kind":"shape","id":"sh/pcn298bm","slide":3,"bbox":[314,324,28,0]}
+{"kind":"shape","id":"sh/4re103a1","slide":3,"bbox":[592,324,28,0]}
+{"kind":"textbox","id":"sh/3qlk7ytg","slide":3,"text":"+","textPreview":"+","textChars":1,"textLines":1,"bbox":[317,305,22,28]}
+{"kind":"textbox","id":"sh/2pcjydsv","slide":3,"text":"+","textPreview":"+","textChars":1,"textLines":1,"bbox":[595,305,22,28]}
+{"kind":"textbox","id":"sh/ho3i58bq","slide":3,"text":"목적지","textPreview":"목적지","textChars":3,"textLines":1,"bbox":[64,470,96,24]}
+{"kind":"textbox","id":"sh/gnu1w3a5","slide":3,"text":"Attack / Wait / Holding / Pending","textPreview":"Attack / Wait / Holding / Pending","textChars":33,"textLines":1,"bbox":[64,500,330,48]}
+{"kind":"textbox","id":"sh/87y1c3i1","slide":3,"text":"순서","textPreview":"순서","textChars":2,"textLines":1,"bbox":[426,470,96,24]}
+{"kind":"textbox","id":"sh/ts72l8j6","slide":3,"text":"도착 조건 + Sequence + 경로 비용","textPreview":"도착 조건 + Sequence + 경로 비용","textChars":24,"textLines":1,"bbox":[426,500,330,48]}
+{"kind":"textbox","id":"sh/65gjat0v","slide":3,"text":"복구","textPreview":"복구","textChars":2,"textLines":1,"bbox":[788,470,96,24]}
+{"kind":"textbox","id":"sh/76pkjy1g","slide":3,"text":"Watchdog + Slot 반납 + 재예약 제외","textPreview":"Watchdog + Slot 반납 + 재예약 제외","textChars":27,"textLines":1,"bbox":[788,500,330,48]}
+{"kind":"shape","id":"sh/k3e18jip","slide":3,"bbox":[64,572,1088,60]}
+{"kind":"textbox","id":"sh/l4n2hoja","slide":3,"text":"핵심","textPreview":"핵심","textChars":2,"textLines":1,"bbox":[88,590,68,22]}
+{"kind":"textbox","id":"sh/y1wj6t0j","slide":3,"text":"엔진 기능은 이동 기반, 포트폴리오의 설계 대상은 ‘집단 의사결정’","textPreview":"엔진 기능은 이동 기반, 포트폴리오의 설계 대상은 ‘집단 의사결정’","textChars":37,"textLines":1,"bbox":[160,582,950,34]}
+{"kind":"textbox","id":"sh/j25kfy14","slide":3,"text":"PROJECT BH · MONSTER MOVEMENT SYSTEM","textPreview":"PROJECT BH · MONSTER MOVEMENT SYSTEM","textChars":36,"textLines":1,"bbox":[64,684,600,16]}
+{"kind":"textbox","id":"sh/4zilkni9","slide":3,"text":"03","textPreview":"03","textChars":2,"textLines":1,"bbox":[1150,682,64,18]}
+{"kind":"notes","id":"nt/48w07o","slide":3,"text":"[Sources]\n- C:/UE5/ProjectBH/ProjectBH/기획/몬스터 이동 시스템 규칙.md — §3.1 이동 책임의 계층, §4 구성 요소와 책임\n- C:/UE5/ProjectBH/Source/ProjectBH/AI/BHCrowdEnemyAIController.cpp\n- C:/UE5/ProjectBH/Source/ProjectBH/Components/Combat/CombatEngagementSlotComponent.cpp\n[/Sources]"}
+{"kind":"slide","id":"sl/nxlng7","slide":4,"title":"03 · CORE LOOP","textShapes":23}
+{"kind":"textbox","id":"sh/wnahc3yh","slide":4,"text":"03 · CORE LOOP","textPreview":"03 · CORE LOOP","textChars":14,"textLines":1,"bbox":[64,36,420,22]}
+{"kind":"textbox","id":"sh/vm1g3yhw","slide":4,"text":"추격과 포위는 하나의 연속 흐름으로 동작한다","textPreview":"추격과 포위는 하나의 연속 흐름으로 동작한다","textChars":24,"textLines":1,"bbox":[64,70,1110,64]}
+{"kind":"textbox","id":"sh/ulszatgb","slide":4,"text":"거리·전투 상태·예약 상태가 이동 의도를 결정한다.","textPreview":"거리·전투 상태·예약 상태가 이동 의도를 결정한다.","textChars":28,"textLines":1,"bbox":[64,132,1080,34]}
+{"kind":"shape","id":"sh/5s3i98zy","slide":4,"bbox":[64,174,1152,0]}
+{"kind":"shape","id":"sh/4ruhgnyd","slide":4,"bbox":[68,260,244,226]}
+{"kind":"shape","id":"sh/jqlg7ih8","slide":4,"bbox":[68,260,244,10]}
+{"kind":"textbox","id":"sh/ipczedgn","slide":4,"text":"PURSUIT","textPreview":"PURSUIT","textChars":7,"textLines":1,"bbox":[90,294,200,32]}
+{"kind":"shape","id":"sh/dg3idsza","slide":4,"bbox":[90,338,136,30]}
+{"kind":"textbox","id":"sh/svuhknyp","slide":4,"text":"> 700 cm","textPreview":"> 700 cm","textChars":8,"textLines":1,"bbox":[90,339,136,27]}
+{"kind":"textbox","id":"sh/ihsf2x4j","slide":4,"text":"Slot 없이 플레이어 예측 위치로\n500 cm/s 전력 추격","textPreview":"Slot 없이 플레이어 예측 위치로 | 500 cm/s 전력 추격","textChars":34,"textLines":2,"bbox":[90,390,200,64]}
+{"kind":"shape","id":"sh/3i1gv25o","slide":4,"bbox":[360,260,244,226]}
+{"kind":"shape","id":"sh/4jax47m9","slide":4,"bbox":[360,260,244,10]}
+{"kind":"textbox","id":"sh/5kjyxcnu","slide":4,"text":"FORMATION","textPreview":"FORMATION","textChars":9,"textLines":1,"bbox":[382,294,200,32]}
+{"kind":"shape","id":"sh/qlcf6h4f","slide":4,"bbox":[382,338,136,30]}
+{"kind":"textbox","id":"sh/r6lgzm50","slide":4,"text":"≤ 700 cm","textPreview":"≤ 700 cm","textChars":8,"textLines":1,"bbox":[382,339,136,27]}
+{"kind":"textbox","id":"sh/s7ux87ml","slide":4,"text":"초기 돌진 후 예약된 위치로\n대형 참여","textPreview":"초기 돌진 후 예약된 위치로 | 대형 참여","textChars":21,"textLines":2,"bbox":[382,390,200,64]}
+{"kind":"shape","id":"sh/d83y1cn6","slide":4,"bbox":[652,260,244,226]}
+{"kind":"shape","id":"sh/mp8fudob","slide":4,"bbox":[652,260,244,10]}
+{"kind":"textbox","id":"sh/7ahwni5g","slide":4,"text":"ATTACK","textPreview":"ATTACK","textChars":6,"textLines":1,"bbox":[674,294,200,32]}
+{"kind":"shape","id":"sh/bid4fuhc","slide":4,"bbox":[674,338,136,30]}
+{"kind":"textbox","id":"sh/qh436p0r","slide":4,"text":"Attack Slot 도착","textPreview":"Attack Slot 도착","textChars":14,"textLines":1,"bbox":[674,339,136,27]}
+{"kind":"textbox","id":"sh/dkvmhkz2","slide":4,"text":"정지 → 공격 → 회복\nSlot은 유지","textPreview":"정지 → 공격 → 회복 | Slot은 유지","textChars":21,"textLines":2,"bbox":[674,390,200,64]}
+{"kind":"shape","id":"sh/cjml8zyx","slide":4,"bbox":[944,260,244,226]}
+{"kind":"shape","id":"sh/3etkbah0","slide":4,"bbox":[944,260,244,10]}
+{"kind":"textbox","id":"sh/2dk3250f","slide":4,"text":"RECOVERY","textPreview":"RECOVERY","textChars":8,"textLines":1,"bbox":[966,294,200,32]}
+{"kind":"shape","id":"sh/pgb2dkz6","slide":4,"bbox":[966,338,136,30]}
+{"kind":"textbox","id":"sh/of2l4fil","slide":4,"text":"실패 / 경직 / 사망","textPreview":"실패 / 경직 / 사망","textChars":12,"textLines":1,"bbox":[966,339,136,27]}
+{"kind":"textbox","id":"sh/nax4nehk","slide":4,"text":"이동 잠금 또는 예약 반납\n필요 시 재진입","textPreview":"이동 잠금 또는 예약 반납 | 필요 시 재진입","textChars":23,"textLines":2,"bbox":[966,390,200,64]}
+{"kind":"shape","id":"sh/m9o3e9gz","slide":4,"bbox":[312,373,48,0]}
+{"kind":"shape","id":"sh/4fy18byh","slide":4,"bbox":[604,373,48,0]}
+{"kind":"shape","id":"sh/5g7i1wf2","slide":4,"bbox":[896,373,48,0]}
+{"kind":"shape","id":"sh/itgz61gb","slide":4,"bbox":[190,486,876,24]}
+{"kind":"textbox","id":"sh/jup0z6xw","slide":4,"text":"이탈 히스테리시스","textPreview":"이탈 히스테리시스","textChars":9,"textLines":1,"bbox":[68,545,340,24]}
+{"kind":"textbox","id":"sh/sji1cbyd","slide":4,"text":"Formation 진입 700 cm / 이탈 900 cm","textPreview":"Formation 진입 700 cm / 이탈 900 cm","textChars":31,"textLines":1,"bbox":[68,576,340,42]}
+{"kind":"textbox","id":"sh/tkri5gfy","slide":4,"text":"공격 후 자리","textPreview":"공격 후 자리","textChars":7,"textLines":1,"bbox":[442,545,340,24]}
+{"kind":"textbox","id":"sh/6hgja1g7","slide":4,"text":"공격·회복이 끝나도 Attack Slot 유지","textPreview":"공격·회복이 끝나도 Attack Slot 유지","textChars":25,"textLines":1,"bbox":[442,576,340,42]}
+{"kind":"textbox","id":"sh/ri9036xs","slide":4,"text":"바라보기","textPreview":"바라보기","textChars":4,"textLines":1,"bbox":[816,545,340,24]}
+{"kind":"textbox","id":"sh/gni1gvep","slide":4,"text":"포위 중 Player Focus, 외곽 추격은 이동 방향","textPreview":"포위 중 Player Focus, 외곽 추격은 이동 방향","textChars":31,"textLines":1,"bbox":[816,576,340,42]}
+{"kind":"textbox","id":"sh/1ori9gfu","slide":4,"text":"PROJECT BH · MONSTER MOVEMENT SYSTEM","textPreview":"PROJECT BH · MONSTER MOVEMENT SYSTEM","textChars":36,"textLines":1,"bbox":[64,684,600,16]}
+{"kind":"textbox","id":"sh/1wjipgja","slide":4,"text":"04","textPreview":"04","textChars":2,"textLines":1,"bbox":[1150,682,64,18]}
+{"kind":"notes","id":"nt/nxlng7","slide":4,"text":"[Sources]\n- C:/UE5/ProjectBH/ProjectBH/기획/몬스터 이동 시스템 규칙.md — §7 Enemy 전투 상태와 이동 허용, §10 초기 대형 편성\n- C:/UE5/ProjectBH/Source/ProjectBH/AI/BHCrowdEnemyAIController.h — EngagementEnterRadius, EngagementExitRadius, movement speeds\n[/Sources]"}
+{"kind":"slide","id":"sl/99v8zy","slide":5,"title":"04 · ENGAGEMENT SLOTS","textShapes":27}
+{"kind":"textbox","id":"sh/5kv6p0ja","slide":5,"text":"04 · ENGAGEMENT SLOTS","textPreview":"04 · ENGAGEMENT SLOTS","textChars":21,"textLines":1,"bbox":[64,36,420,22]}
+{"kind":"textbox","id":"sh/ihknel0j","slide":5,"text":"29개의 예약 자리와 무제한 외곽 대기열","textPreview":"29개의 예약 자리와 무제한 외곽 대기열","textChars":22,"textLines":1,"bbox":[64,70,1110,64]}
+{"kind":"textbox","id":"sh/jitonq14","slide":5,"text":"가까운 Enemy 모두가 같은 목적지를 향하지 않도록 역할과 반경을 분리했다.","textPreview":"가까운 Enemy 모두가 같은 목적지를 향하지 않도록 역할과 반경을 분리했다.","textChars":43,"textLines":1,"bbox":[64,132,1080,34]}
+{"kind":"shape","id":"sh/snm5kvil","slide":5,"bbox":[64,174,1152,0]}
+{"kind":"shape","id":"sh/tov6t0j6","slide":5,"bbox":[171,205,390,390]}
+{"kind":"shape","id":"sh/6l4ni50f","slide":5,"bbox":[226,260,280,280]}
+{"kind":"shape","id":"sh/7mdorq10","slide":5,"bbox":[278,312,176,176]}
+{"kind":"shape","id":"sh/gr65ofix","slide":5,"bbox":[320,354,92,92]}
+{"kind":"shape","id":"sh/hsf6xkj2","slide":5,"bbox":[342,376,48,48]}
+{"kind":"textbox","id":"sh/9snm5gfu","slide":5,"text":"P","textPreview":"P","textChars":1,"textLines":1,"bbox":[351,386,30,28]}
+{"kind":"shape","id":"sh/8re5cvy9","slide":5,"bbox":[358.5,346.5,15,15]}
+{"kind":"shape","id":"sh/7q543qxo","slide":5,"bbox":[402.25,378.29,15,15]}
+{"kind":"shape","id":"sh/mpcnalg3","slide":5,"bbox":[385.54,429.71,15,15]}
+{"kind":"shape","id":"sh/hwnm90fq","slide":5,"bbox":[331.46,429.71,15,15]}
+{"kind":"shape","id":"sh/wve5gvy5","slide":5,"bbox":[314.75,378.29,15,15]}
+{"kind":"shape","id":"sh/vu547qxk","slide":5,"bbox":[366.41,304.86,15,15]}
+{"kind":"shape","id":"sh/utwnelgz","slide":5,"bbox":[426.07,336.12,15,15]}
+{"kind":"shape","id":"sh/x03mxwzm","slide":5,"bbox":[446.14,400.41,15,15]}
+{"kind":"shape","id":"sh/czul4by1","slide":5,"bbox":[414.88,460.07,15,15]}
+{"kind":"shape","id":"sh/o3e5kb6x","slide":5,"bbox":[350.59,480.14,15,15]}
+{"kind":"shape","id":"sh/p47mtg7i","slide":5,"bbox":[290.93,448.88,15,15]}
+{"kind":"shape","id":"sh/21wni1or","slide":5,"bbox":[270.86,384.59,15,15]}
+{"kind":"shape","id":"sh/3254r6pc","slide":5,"bbox":[302.12,324.93,15,15]}
+{"kind":"shape","id":"sh/c7y5ob6t","slide":5,"bbox":[385.56,256.76,11,11]}
+{"kind":"shape","id":"sh/d876xg7e","slide":5,"bbox":[451.08,287.75,11,11]}
+{"kind":"shape","id":"sh/q5gnm1on","slide":5,"bbox":[492.32,347.34,11,11]}
+{"kind":"shape","id":"sh/b6p4v6p8","slide":5,"bbox":[498.24,419.56,11,11]}
+{"kind":"shape","id":"sh/0bi5sv65","slide":5,"bbox":[467.25,485.08,11,11]}
+{"kind":"shape","id":"sh/lwr610na","slide":5,"bbox":[407.66,526.32,11,11]}
+{"kind":"shape","id":"sh/v2dg7ed4","slide":5,"bbox":[335.44,532.24,11,11]}
+{"kind":"shape","id":"sh/u14ze9cj","slide":5,"bbox":[269.92,501.25,11,11]}
+{"kind":"shape","id":"sh/h4vy9ovu","slide":5,"bbox":[228.68,441.66,11,11]}
+{"kind":"shape","id":"sh/g3mhgju9","slide":5,"bbox":[222.76,369.44,11,11]}
+{"kind":"shape","id":"sh/7etg3eds","slide":5,"bbox":[253.75,303.92,11,11]}
+{"kind":"shape","id":"sh/mdkza9c7","slide":5,"bbox":[313.34,262.68,11,11]}
+{"kind":"shape","id":"sh/tgvy5ovy","slide":5,"bbox":[412.51,206.56,11,11]}
+{"kind":"shape","id":"sh/8f2hcjud","slide":5,"bbox":[480.47,240.77,11,11]}
+{"kind":"shape","id":"sh/rax0fytw","slide":5,"bbox":[530.17,298.39,11,11]}
+{"kind":"shape","id":"sh/q9ozmtcr","slide":5,"bbox":[554.03,370.63,11,11]}
+{"kind":"shape","id":"sh/eh43ax8v","slide":5,"bbox":[548.44,446.51,11,11]}
+{"kind":"shape","id":"sh/zidk329g","slide":5,"bbox":[514.23,514.47,11,11]}
+{"kind":"shape","id":"sh/0jmlc7q1","slide":5,"bbox":[456.61,564.17,11,11]}
+{"kind":"shape","id":"sh/1kv25cr6","slide":5,"bbox":[384.37,588.03,11,11]}
+{"kind":"shape","id":"sh/qtk36d8j","slide":5,"bbox":[308.49,582.44,11,11]}
+{"kind":"shape","id":"sh/retkzi94","slide":5,"bbox":[240.53,548.23,11,11]}
+{"kind":"shape","id":"sh/cfml8nqp","slide":5,"bbox":[190.83,490.61,11,11]}
+{"kind":"shape","id":"sh/dgv21sra","slide":5,"bbox":[166.97,418.37,11,11]}
+{"kind":"shape","id":"sh/apo3ih83","slide":5,"bbox":[172.56,342.49,11,11]}
+{"kind":"shape","id":"sh/baxkbm9o","slide":5,"bbox":[206.77,274.53,11,11]}
+{"kind":"shape","id":"sh/l4z61gbq","slide":5,"bbox":[264.39,224.83,11,11]}
+{"kind":"shape","id":"sh/kjq58ba5","slide":5,"bbox":[336.63,200.97,11,11]}
+{"kind":"textbox","id":"sh/jihoz6tk","slide":5,"text":"역할","textPreview":"역할","textChars":2,"textLines":1,"bbox":[668,220,160,22]}
+{"kind":"textbox","id":"sh/yh8n61sz","slide":5,"text":"수","textPreview":"수","textChars":1,"textLines":1,"bbox":[846,220,60,22]}
+{"kind":"textbox","id":"sh/xgz6xgbe","slide":5,"text":"반경","textPreview":"반경","textChars":2,"textLines":1,"bbox":[922,220,90,22]}
+{"kind":"textbox","id":"sh/wfq54ba9","slide":5,"text":"행동","textPreview":"행동","textChars":2,"textLines":1,"bbox":[1030,220,140,22]}
+{"kind":"shape","id":"sh/beh4v6to","slide":5,"bbox":[650,258,520,62]}
+{"kind":"shape","id":"sh/adon21s3","slide":5,"bbox":[669,282,14,14]}
+{"kind":"textbox","id":"sh/hcj690by","slide":5,"text":"ATTACK","textPreview":"ATTACK","textChars":6,"textLines":1,"bbox":[692,276,145,28]}
+{"kind":"textbox","id":"sh/gba5gvad","slide":5,"text":"5","textPreview":"5","textChars":1,"textLines":1,"bbox":[846,276,56,28]}
+{"kind":"textbox","id":"sh/0fipczip","slide":5,"text":"125 cm","textPreview":"125 cm","textChars":6,"textLines":1,"bbox":[922,276,96,28]}
+{"kind":"textbox","id":"sh/1grql4zu","slide":5,"text":"공격 권한 + 자리 유지","textPreview":"공격 권한 + 자리 유지","textChars":13,"textLines":1,"bbox":[1030,276,126,30]}
+{"kind":"shape","id":"sh/ed07a90j","slide":5,"bbox":[650,336,520,62]}
+{"kind":"shape","id":"sh/fe98jeh4","slide":5,"bbox":[669,360,14,14]}
+{"kind":"textbox","id":"sh/sbip8zid","slide":5,"text":"WAIT","textPreview":"WAIT","textChars":4,"textLines":1,"bbox":[692,354,145,28]}
+{"kind":"textbox","id":"sh/dcrqh4zy","slide":5,"text":"8","textPreview":"8","textChars":1,"textLines":1,"bbox":[846,354,56,28]}
+{"kind":"textbox","id":"sh/qp076p07","slide":5,"text":"250 cm","textPreview":"250 cm","textChars":6,"textLines":1,"bbox":[922,354,96,28]}
+{"kind":"textbox","id":"sh/rq98fuhs","slide":5,"text":"Attack 승격 대기","textPreview":"Attack 승격 대기","textChars":12,"textLines":1,"bbox":[1030,354,126,30]}
+{"kind":"shape","id":"sh/4nyp4fih","slide":5,"bbox":[650,414,520,62]}
+{"kind":"shape","id":"sh/5o7qdkz2","slide":5,"bbox":[669,438,14,14]}
+{"kind":"textbox","id":"sh/7ip8nalo","slide":5,"text":"HOLDING","textPreview":"HOLDING","textChars":7,"textLines":1,"bbox":[692,432,145,28]}
+{"kind":"textbox","id":"sh/mhwrepk3","slide":5,"text":"16","textPreview":"16","textChars":2,"textLines":1,"bbox":[846,432,56,28]}
+{"kind":"textbox","id":"sh/9k7qpk3u","slide":5,"text":"400 cm","textPreview":"400 cm","textChars":6,"textLines":1,"bbox":[922,432,96,28]}
+{"kind":"textbox","id":"sh/8jy9gf29","slide":5,"text":"Wait 승격 대기","textPreview":"Wait 승격 대기","textChars":10,"textLines":1,"bbox":[1030,432,126,30]}
+{"kind":"shape","id":"sh/vmp8rul0","slide":5,"bbox":[650,492,520,62]}
+{"kind":"shape","id":"sh/ulgripkf","slide":5,"bbox":[669,516,14,14]}
+{"kind":"textbox","id":"sh/ho7qt43q","slide":5,"text":"PENDING","textPreview":"PENDING","textChars":7,"textLines":1,"bbox":[692,510,145,28]}
+{"kind":"textbox","id":"sh/wny9kz25","slide":5,"text":"∞","textPreview":"∞","textChars":1,"textLines":1,"bbox":[846,510,56,28]}
+{"kind":"textbox","id":"sh/3a98vulw","slide":5,"text":"575 cm+","textPreview":"575 cm+","textChars":7,"textLines":1,"bbox":[922,510,96,28]}
+{"kind":"textbox","id":"sh/i9grm9kb","slide":5,"text":"예약 초과 외곽 분산","textPreview":"예약 초과 외곽 분산","textChars":11,"textLines":1,"bbox":[1030,510,126,30]}
+{"kind":"shape","id":"sh/qxgvatgf","slide":5,"bbox":[650,590,520,44]}
+{"kind":"textbox","id":"sh/rypcjyh0","slide":5,"text":"30번째 Enemy부터 Pending Queue","textPreview":"30번째 Enemy부터 Pending Queue","textChars":26,"textLines":1,"bbox":[672,599,470,26]}
+{"kind":"textbox","id":"sh/czydc3yl","slide":5,"text":"PROJECT BH · MONSTER MOVEMENT SYSTEM","textPreview":"PROJECT BH · MONSTER MOVEMENT SYSTEM","textChars":36,"textLines":1,"bbox":[64,684,600,16]}
+{"kind":"textbox","id":"sh/d07ul8z6","slide":5,"text":"05","textPreview":"05","textChars":2,"textLines":1,"bbox":[1150,682,64,18]}
+{"kind":"notes","id":"nt/99v8zy","slide":5,"text":"[Sources]\n- C:/UE5/ProjectBH/ProjectBH/기획/몬스터 이동 시스템 규칙.md — §8 전투 자리 구조\n- C:/UE5/ProjectBH/Source/ProjectBH/Components/Combat/CombatEngagementSlotComponent.h — AttackSlotCount, WaitSlotCount, HoldingSlotCount, ring radii\n[/Sources]"}
+{"kind":"slide","id":"sl/l0gird","slide":6,"title":"05 · SPACE ADAPTATION","textShapes":16}
+{"kind":"textbox","id":"sh/c7y5k7md","slide":6,"text":"05 · SPACE ADAPTATION","textPreview":"05 · SPACE ADAPTATION","textChars":21,"textLines":1,"bbox":[64,36,420,22]}
+{"kind":"textbox","id":"sh/r6p4b258","slide":6,"text":"공간 형태가 바뀌면 대형도 바뀐다","textPreview":"공간 형태가 바뀌면 대형도 바뀐다","textChars":18,"textLines":1,"bbox":[64,70,1110,64]}
+{"kind":"textbox","id":"sh/q5gnix4n","slide":6,"text":"플레이어 주변 NavMesh를 0.2초마다 16방향으로 탐침해 Open·Corridor·Pocket을 판정한다.","textPreview":"플레이어 주변 NavMesh를 0.2초마다 16방향으로 탐침해 Open·Corridor·Pocket을 판정한다.","textChars":62,"textLines":1,"bbox":[64,132,1080,34]}
+{"kind":"shape","id":"sh/1crmhwna","slide":6,"bbox":[64,174,1152,0]}
+{"kind":"shape","id":"sh/0by5ormp","slide":6,"bbox":[64,216,340,350]}
+{"kind":"textbox","id":"sh/zap4fm54","slide":6,"text":"OPEN","textPreview":"OPEN","textChars":4,"textLines":1,"bbox":[88,238,190,30]}
+{"kind":"shape","id":"sh/e9gnmh4j","slide":6,"bbox":[266,236,112,30]}
+{"kind":"textbox","id":"sh/hgnmlsnq","slide":6,"text":"원형 포위","textPreview":"원형 포위","textChars":5,"textLines":1,"bbox":[266,237,112,27]}
+{"kind":"shape","id":"sh/gfelcnml","slide":6,"bbox":[438,216,340,350]}
+{"kind":"textbox","id":"sh/ux8f6ds3","slide":6,"text":"CORRIDOR","textPreview":"CORRIDOR","textChars":8,"textLines":1,"bbox":[462,238,190,30]}
+{"kind":"shape","id":"sh/fy1gzito","slide":6,"bbox":[640,236,112,30]}
+{"kind":"textbox","id":"sh/gzax83a9","slide":6,"text":"양방향 종대","textPreview":"양방향 종대","textChars":6,"textLines":1,"bbox":[640,237,112,27]}
+{"kind":"shape","id":"sh/h0jy18bu","slide":6,"bbox":[812,216,340,350]}
+{"kind":"textbox","id":"sh/21sfadsf","slide":6,"text":"POCKET","textPreview":"POCKET","textChars":6,"textLines":1,"bbox":[836,238,190,30]}
+{"kind":"shape","id":"sh/321g3it0","slide":6,"bbox":[1014,236,112,30]}
+{"kind":"textbox","id":"sh/4nahcna5","slide":6,"text":"열린 쪽 부채꼴","textPreview":"열린 쪽 부채꼴","textChars":8,"textLines":1,"bbox":[1014,237,112,27]}
+{"kind":"shape","id":"sh/pojy5sbq","slide":6,"bbox":[139,305,190,190]}
+{"kind":"shape","id":"sh/qpszexsb","slide":6,"bbox":[176,342,116,116]}
+{"kind":"shape","id":"sh/rqlg72tw","slide":6,"bbox":[217,383,34,34]}
+{"kind":"shape","id":"sh/nulwv2p4","slide":6,"bbox":[227,335,14,14]}
+{"kind":"shape","id":"sh/mtcf2x8j","slide":6,"bbox":[282.16,375.08,14,14]}
+{"kind":"shape","id":"sh/9w3yxc7a","slide":6,"bbox":[261.09,439.92,14,14]}
+{"kind":"shape","id":"sh/ovux47qp","slide":6,"bbox":[192.91,439.92,14,14]}
+{"kind":"shape","id":"sh/zqlwrips","slide":6,"bbox":[171.84,375.08,14,14]}
+{"kind":"shape","id":"sh/epcfyd87","slide":6,"bbox":[321.61,413.37,11,11]}
+{"kind":"shape","id":"sh/1s3ets7y","slide":6,"bbox":[280.99,473.68,11,11]}
+{"kind":"shape","id":"sh/0rux0nqd","slide":6,"bbox":[209.63,487.61,11,11]}
+{"kind":"shape","id":"sh/r21wni9w","slide":6,"bbox":[149.32,446.99,11,11]}
+{"kind":"shape","id":"sh/q1sfud8b","slide":6,"bbox":[135.39,375.63,11,11]}
+{"kind":"shape","id":"sh/g7qt4j69","slide":6,"bbox":[176.01,315.32,11,11]}
+{"kind":"shape","id":"sh/h8zuxonu","slide":6,"bbox":[247.37,301.39,11,11]}
+{"kind":"shape","id":"sh/u5ob29o3","slide":6,"bbox":[307.68,342.01,11,11]}
+{"kind":"textbox","id":"sh/f6hcve5o","slide":6,"text":"넓은 공간","textPreview":"넓은 공간","textChars":5,"textLines":1,"bbox":[88,520,292,22]}
+{"kind":"shape","id":"sh/4vqd8j65","slide":6,"bbox":[478,294,260,216]}
+{"kind":"shape","id":"sh/pwzu1onq","slide":6,"bbox":[532,294,152,216]}
+{"kind":"shape","id":"sh/298v69oz","slide":6,"bbox":[591,383,34,34]}
+{"kind":"shape","id":"sh/3ahcze5k","slide":6,"bbox":[544,376,12,12]}
+{"kind":"shape","id":"sh/kf6twz61","slide":6,"bbox":[544,412,12,12]}
+{"kind":"shape","id":"sh/50fup47m","slide":6,"bbox":[510,376,12,12]}
+{"kind":"shape","id":"sh/dwrm54nq","slide":6,"bbox":[510,412,12,12]}
+{"kind":"shape","id":"sh/cvilwz65","slide":6,"bbox":[476,376,12,12]}
+{"kind":"shape","id":"sh/bu943upk","slide":6,"bbox":[476,412,12,12]}
+{"kind":"shape","id":"sh/qtg3upof","slide":6,"bbox":[442,376,12,12]}
+{"kind":"shape","id":"sh/ps7m1k7u","slide":6,"bbox":[442,412,12,12]}
+{"kind":"shape","id":"sh/o7ylsf69","slide":6,"bbox":[660,376,12,12]}
+{"kind":"shape","id":"sh/36p4zapo","slide":6,"bbox":[660,412,12,12]}
+{"kind":"shape","id":"sh/25g3q5o3","slide":6,"bbox":[694,376,12,12]}
+{"kind":"shape","id":"sh/147mx07i","slide":6,"bbox":[694,412,12,12]}
+{"kind":"shape","id":"sh/g3ylof6x","slide":6,"bbox":[728,376,12,12]}
+{"kind":"shape","id":"sh/69cjy14v","slide":6,"bbox":[728,412,12,12]}
+{"kind":"shape","id":"sh/7al0r65g","slide":6,"bbox":[762,376,12,12]}
+{"kind":"shape","id":"sh/sbe10bm1","slide":6,"bbox":[762,412,12,12]}
+{"kind":"textbox","id":"sh/tcnitgnm","slide":6,"text":"벽을 횡단하지 않는 Side × Lane","textPreview":"벽을 횡단하지 않는 Side × Lane","textChars":22,"textLines":1,"bbox":[462,520,292,22]}
+{"kind":"shape","id":"sh/i5cju14z","slide":6,"bbox":[832,306,296,196]}
+{"kind":"shape","id":"sh/j6l0n65k","slide":6,"bbox":[832,306,88,196]}
+{"kind":"shape","id":"sh/k7u1wbmp","slide":6,"bbox":[832,306,296,52]}
+{"kind":"shape","id":"sh/583ipgna","slide":6,"bbox":[832,450,296,52]}
+{"kind":"shape","id":"sh/ahsjqh4n","slide":6,"bbox":[953,388,34,34]}
+{"kind":"shape","id":"sh/v210jm58","slide":6,"bbox":[1021.25,355.5,13,13]}
+{"kind":"shape","id":"sh/zmhgril0","slide":6,"bbox":[1051.63,335.5,10,10]}
+{"kind":"shape","id":"sh/yl8fyxkf","slide":6,"bbox":[1031.84,375.85,13,13]}
+{"kind":"shape","id":"sh/l8zyts36","slide":6,"bbox":[1067.52,366.03,10,10]}
+{"kind":"shape","id":"sh/0nqx0n2l","slide":6,"bbox":[1035.5,398.5,13,13]}
+{"kind":"shape","id":"sh/nahgv2lc","slide":6,"bbox":[1073,400,10,10]}
+{"kind":"shape","id":"sh/m98f2xkr","slide":6,"bbox":[1031.84,421.15,13,13]}
+{"kind":"shape","id":"sh/9cjyxc32","slide":6,"bbox":[1067.52,433.97,10,10]}
+{"kind":"shape","id":"sh/8bqx472h","slide":6,"bbox":[1021.25,441.5,13,13]}
+{"kind":"shape","id":"sh/3exgjyls","slide":6,"bbox":[1051.63,464.5,10,10]}
+{"kind":"textbox","id":"sh/2dofqtk7","slide":6,"text":"벽 반대편 열린 호에 압축","textPreview":"벽 반대편 열린 호에 압축","textChars":14,"textLines":1,"bbox":[836,520,292,22]}
+{"kind":"shape","id":"sh/sj2d0zi5","slide":6,"bbox":[64,594,1088,42]}
+{"kind":"textbox","id":"sh/tkbut4jq","slide":6,"text":"히스테리시스","textPreview":"히스테리시스","textChars":6,"textLines":1,"bbox":[86,604,118,20]}
+{"kind":"textbox","id":"sh/6xkvy90z","slide":6,"text":"진입·이탈 임계값과 유지 시간을 분리해 경계에서 대형이 깜박이지 않게 했다.","textPreview":"진입·이탈 임계값과 유지 시간을 분리해 경계에서 대형이 깜박이지 않게 했다.","textChars":42,"textLines":1,"bbox":[214,599,900,27]}
+{"kind":"textbox","id":"sh/ritcru1k","slide":6,"text":"PROJECT BH · MONSTER MOVEMENT SYSTEM","textPreview":"PROJECT BH · MONSTER MOVEMENT SYSTEM","textChars":36,"textLines":1,"bbox":[64,684,600,16]}
+{"kind":"textbox","id":"sh/4v2dwzi9","slide":6,"text":"06","textPreview":"06","textChars":2,"textLines":1,"bbox":[1150,682,64,18]}
+{"kind":"notes","id":"nt/l0gird","slide":6,"text":"[Sources]\n- C:/UE5/ProjectBH/ProjectBH/기획/몬스터 이동 시스템 규칙.md — §20 전투 공간 분석과 §21 공간별 대형\n- C:/UE5/ProjectBH/ProjectBH/작업 기록/2026-08-29 - 전투 공간 분석기 1단계 구현.md\n- C:/UE5/ProjectBH/ProjectBH/작업 기록/2026-08-29 - Open 밀도 및 Pocket 부채꼴 대형 구현.md\n[/Sources]"}
+{"kind":"slide","id":"sl/qkiidq","slide":7,"title":"06 · CORRIDOR QUEUE","textShapes":23}
+{"kind":"textbox","id":"sh/lg7ylc72","slide":7,"text":"06 · CORRIDOR QUEUE","textPreview":"06 · CORRIDOR QUEUE","textChars":19,"textLines":1,"bbox":[64,36,420,22]}
+{"kind":"textbox","id":"sh/ydwfax8b","slide":7,"text":"좁은 통로에서는 ‘추월 없는 두 전선’으로 바뀐다","textPreview":"좁은 통로에서는 ‘추월 없는 두 전선’으로 바뀐다","textChars":27,"textLines":1,"bbox":[64,70,1110,64]}
+{"kind":"textbox","id":"sh/ze5gj2pw","slide":7,"text":"Enemy가 어느 쪽에서 진입했는지 Side를 고정하고, Side × Lane별 독립 Queue를 유지한다.","textPreview":"Enemy가 어느 쪽에서 진입했는지 Side를 고정하고, Side × Lane별 독립 Queue를 유지한다.","textChars":60,"textLines":1,"bbox":[64,132,1080,34]}
+{"kind":"shape","id":"sh/8jyxgrqd","slide":7,"bbox":[64,174,1152,0]}
+{"kind":"shape","id":"sh/9k7ypw7y","slide":7,"bbox":[64,214,716,400]}
+{"kind":"shape","id":"sh/mhgfeh8n","slide":7,"bbox":[96,250,652,54]}
+{"kind":"shape","id":"sh/nipgnmps","slide":7,"bbox":[96,524,652,54]}
+{"kind":"shape","id":"sh/w7ixkr6p","slide":7,"bbox":[422,304,0,220]}
+{"kind":"shape","id":"sh/x8rytw7a","slide":7,"bbox":[397,389,50,50]}
+{"kind":"textbox","id":"sh/h0fy9w3e","slide":7,"text":"P","textPreview":"P","textChars":1,"textLines":1,"bbox":[405,398,34,30]}
+{"kind":"shape","id":"sh/wz6h0rmt","slide":7,"bbox":[342,372,20,20]}
+{"kind":"shape","id":"sh/vyxg7ml8","slide":7,"bbox":[342,436,20,20]}
+{"kind":"shape","id":"sh/udozy14n","slide":7,"bbox":[276,372,20,20]}
+{"kind":"shape","id":"sh/54zydg3a","slide":7,"bbox":[276,436,20,20]}
+{"kind":"shape","id":"sh/436h4bmp","slide":7,"bbox":[210,372,20,20]}
+{"kind":"shape","id":"sh/j2xgb6lk","slide":7,"bbox":[210,436,20,20]}
+{"kind":"shape","id":"sh/i1oz214z","slide":7,"bbox":[144,372,20,20]}
+{"kind":"shape","id":"sh/l8vy1c36","slide":7,"bbox":[144,436,20,20]}
+{"kind":"shape","id":"sh/07mxs7ml","slide":7,"bbox":[482,372,20,20]}
+{"kind":"shape","id":"sh/c3qp4byt","slide":7,"bbox":[482,436,20,20]}
+{"kind":"shape","id":"sh/x4jqxgfe","slide":7,"bbox":[548,372,20,20]}
+{"kind":"shape","id":"sh/q18721gn","slide":7,"bbox":[548,436,20,20]}
+{"kind":"shape","id":"sh/b2h8v6x8","slide":7,"bbox":[614,372,20,20]}
+{"kind":"shape","id":"sh/krap8vyp","slide":7,"bbox":[614,436,20,20]}
+{"kind":"shape","id":"sh/lsjq1gfa","slide":7,"bbox":[680,372,20,20]}
+{"kind":"shape","id":"sh/yps76lgj","slide":7,"bbox":[680,436,20,20]}
+{"kind":"textbox","id":"sh/zq18zqx4","slide":7,"text":"SIDE −","textPreview":"SIDE −","textChars":6,"textLines":1,"bbox":[108,320,120,24]}
+{"kind":"textbox","id":"sh/8vu9cvy1","slide":7,"text":"SIDE +","textPreview":"SIDE +","textChars":6,"textLines":1,"bbox":[628,320,100,24]}
+{"kind":"textbox","id":"sh/9w3q50f6","slide":7,"text":"Lane 0","textPreview":"Lane 0","textChars":6,"textLines":1,"bbox":[108,371,84,20]}
+{"kind":"textbox","id":"sh/jq5svuho","slide":7,"text":"Lane 1","textPreview":"Lane 1","textChars":6,"textLines":1,"bbox":[108,435,84,20]}
+{"kind":"textbox","id":"sh/ipwb2p03","slide":7,"text":"플레이어 횡단 금지","textPreview":"플레이어 횡단 금지","textChars":10,"textLines":1,"bbox":[328,548,188,22]}
+{"kind":"shape","id":"sh/5snax4ze","slide":7,"bbox":[816,224,36,36]}
+{"kind":"textbox","id":"sh/4ret4zi9","slide":7,"text":"1","textPreview":"1","textChars":1,"textLines":1,"bbox":[820,230,28,24]}
+{"kind":"textbox","id":"sh/vmlsruhc","slide":7,"text":"SIDE 고정","textPreview":"SIDE 고정","textChars":7,"textLines":1,"bbox":[868,221,270,26]}
+{"kind":"textbox","id":"sh/ulcbyp0r","slide":7,"text":"통로 진입 위치를 축에 투영해 양쪽 중 하나를 유지","textPreview":"통로 진입 위치를 축에 투영해 양쪽 중 하나를 유지","textChars":28,"textLines":1,"bbox":[868,252,308,44]}
+{"kind":"shape","id":"sh/honatkzi","slide":7,"bbox":[816,320,36,36]}
+{"kind":"textbox","id":"sh/wnet0fix","slide":7,"text":"2","textPreview":"2","textChars":1,"textLines":1,"bbox":[820,326,28,24]}
+{"kind":"textbox","id":"sh/fipc3ehw","slide":7,"text":"CHANNEL","textPreview":"CHANNEL","textChars":7,"textLines":1,"bbox":[868,317,270,26]}
+{"kind":"textbox","id":"sh/ehgba90b","slide":7,"text":"Side × Lane 조합별로 Wait·Holding·Pending을 배열","textPreview":"Side × Lane 조합별로 Wait·Holding·Pending을 배열","textChars":41,"textLines":1,"bbox":[868,348,308,44]}
+{"kind":"shape","id":"sh/25wfydwf","slide":7,"bbox":[816,416,36,36]}
+{"kind":"textbox","id":"sh/n65wrid0","slide":7,"text":"3","textPreview":"3","textChars":1,"textLines":1,"bbox":[820,422,28,24]}
+{"kind":"textbox","id":"sh/orex0nel","slide":7,"text":"승격 제한","textPreview":"승격 제한","textChars":5,"textLines":1,"bbox":[868,413,270,26]}
+{"kind":"textbox","id":"sh/psnet8v6","slide":7,"text":"같은 Channel 안에서만 앞자리로 승격","textPreview":"같은 Channel 안에서만 앞자리로 승격","textChars":23,"textLines":1,"bbox":[868,444,308,44]}
+{"kind":"shape","id":"sh/e1wvutwj","slide":7,"bbox":[816,512,36,36]}
+{"kind":"textbox","id":"sh/f25wnyd4","slide":7,"text":"4","textPreview":"4","textChars":1,"textLines":1,"bbox":[820,518,28,24]}
+{"kind":"textbox","id":"sh/03exw3e9","slide":7,"text":"가변 전열","textPreview":"가변 전열","textChars":5,"textLines":1,"bbox":[868,509,270,26]}
+{"kind":"textbox","id":"sh/14nep8vu","slide":7,"text":"폭에 따라 Attack 2·4·5명, 5명은 3/2 분배","textPreview":"폭에 따라 Attack 2·4·5명, 5명은 3/2 분배","textChars":31,"textLines":1,"bbox":[868,540,308,44]}
+{"kind":"textbox","id":"sh/yxgf6xwn","slide":7,"text":"PROJECT BH · MONSTER MOVEMENT SYSTEM","textPreview":"PROJECT BH · MONSTER MOVEMENT SYSTEM","textChars":36,"textLines":1,"bbox":[64,684,600,16]}
+{"kind":"textbox","id":"sh/zypwz2d8","slide":7,"text":"07","textPreview":"07","textChars":2,"textLines":1,"bbox":[1150,682,64,18]}
+{"kind":"notes","id":"nt/qkiidq","slide":7,"text":"[Sources]\n- C:/UE5/ProjectBH/ProjectBH/작업 기록/2026-08-30 - Attack Slot 5개 및 양방향 Corridor 구현.md\n- C:/UE5/ProjectBH/ProjectBH/작업 기록/2026-08-29 - Corridor Lane Queue 규칙 구현.md\n- C:/UE5/ProjectBH/Source/ProjectBH/Components/Combat/CombatEngagementSlotComponent.cpp — corridor side/channel admission and repacking\n[/Sources]"}
+{"kind":"slide","id":"sl/vf5lqr","slide":8,"title":"07 · QUEUE & RECOVERY","textShapes":24}
+{"kind":"textbox","id":"sh/gn2hgrat","slide":8,"text":"07 · QUEUE & RECOVERY","textPreview":"07 · QUEUE & RECOVERY","textChars":21,"textLines":1,"bbox":[64,36,420,22]}
+{"kind":"textbox","id":"sh/fmt07mto","slide":8,"text":"빈자리는 빠르게 채우되, 순서와 도달 가능성을 지킨다","textPreview":"빈자리는 빠르게 채우되, 순서와 도달 가능성을 지킨다","textChars":29,"textLines":1,"bbox":[64,70,1110,64]}
+{"kind":"textbox","id":"sh/elkzehs3","slide":8,"text":"승격은 단순 FIFO가 아니라 도착·경로·혼잡·실패 이력을 함께 본다.","textPreview":"승격은 단순 FIFO가 아니라 도착·경로·혼잡·실패 이력을 함께 본다.","textChars":39,"textLines":1,"bbox":[64,132,1080,34]}
+{"kind":"shape","id":"sh/tkbi5wbi","slide":8,"bbox":[64,174,1152,0]}
+{"kind":"shape","id":"sh/sj2hcrax","slide":8,"bbox":[76,240,202,112]}
+{"kind":"shape","id":"sh/rit03mtc","slide":8,"bbox":[76,240,202,9]}
+{"kind":"textbox","id":"sh/6hkzahsr","slide":8,"text":"PENDING","textPreview":"PENDING","textChars":7,"textLines":1,"bbox":[96,268,162,28]}
+{"kind":"textbox","id":"sh/xgfihgbm","slide":8,"text":"예약 초과","textPreview":"예약 초과","textChars":5,"textLines":1,"bbox":[96,305,162,24]}
+{"kind":"shape","id":"sh/cf61oba1","slide":8,"bbox":[334,240,202,112]}
+{"kind":"shape","id":"sh/up0by5on","slide":8,"bbox":[334,240,202,9]}
+{"kind":"textbox","id":"sh/fq9crap8","slide":8,"text":"HOLDING","textPreview":"HOLDING","textChars":7,"textLines":1,"bbox":[354,268,162,28]}
+{"kind":"textbox","id":"sh/grit0f6t","slide":8,"text":"16자리","textPreview":"16자리","textChars":4,"textLines":1,"bbox":[354,305,162,24]}
+{"kind":"shape","id":"sh/hcrutk7e","slide":8,"bbox":[592,240,202,112]}
+{"kind":"shape","id":"sh/6lgbu58r","slide":8,"bbox":[592,240,202,9]}
+{"kind":"textbox","id":"sh/7mpcnapc","slide":8,"text":"WAIT","textPreview":"WAIT","textChars":4,"textLines":1,"bbox":[612,268,162,28]}
+{"kind":"textbox","id":"sh/snytwf6x","slide":8,"text":"8자리","textPreview":"8자리","textChars":3,"textLines":1,"bbox":[612,305,162,24]}
+{"kind":"shape","id":"sh/torupk72","slide":8,"bbox":[850,240,202,112]}
+{"kind":"shape","id":"sh/qhkv6pov","slide":8,"bbox":[850,240,202,9]}
+{"kind":"textbox","id":"sh/ritczupg","slide":8,"text":"ATTACK","textPreview":"ATTACK","textChars":6,"textLines":1,"bbox":[870,268,162,28]}
+{"kind":"textbox","id":"sh/nq10b21g","slide":8,"text":"5자리","textPreview":"5자리","textChars":3,"textLines":1,"bbox":[870,305,162,24]}
+{"kind":"shape","id":"sh/2psz2xkb","slide":8,"bbox":[278,296,56,0]}
+{"kind":"shape","id":"sh/pc3idcjm","slide":8,"bbox":[536,296,56,0]}
+{"kind":"shape","id":"sh/obuh47i1","slide":8,"bbox":[794,296,56,0]}
+{"kind":"shape","id":"sh/bel0f21s","slide":8,"bbox":[76,402,76,30]}
+{"kind":"textbox","id":"sh/adcj6x07","slide":8,"text":"도착","textPreview":"도착","textChars":2,"textLines":1,"bbox":[76,403,76,27]}
+{"kind":"textbox","id":"sh/xg3ihcjy","slide":8,"text":"현재 Slot 60 cm 이내","textPreview":"현재 Slot 60 cm 이내","textChars":16,"textLines":1,"bbox":[76,445,218,44]}
+{"kind":"shape","id":"sh/cfu187id","slide":8,"bbox":[334,402,76,30]}
+{"kind":"textbox","id":"sh/zil0jm1o","slide":8,"text":"경로","textPreview":"경로","textChars":2,"textLines":1,"bbox":[334,403,76,27]}
+{"kind":"textbox","id":"sh/yhcjah0j","slide":8,"text":"완전한 Nav 경로 존재","textPreview":"완전한 Nav 경로 존재","textChars":13,"textLines":1,"bbox":[334,445,218,44]}
+{"kind":"shape","id":"sh/wneh0ryh","slide":8,"bbox":[592,402,76,30]}
+{"kind":"textbox","id":"sh/honitwz2","slide":8,"text":"혼잡","textPreview":"혼잡","textChars":2,"textLines":1,"bbox":[592,403,76,27]}
+{"kind":"textbox","id":"sh/ulwzyhgb","slide":8,"text":"경로 주변 Agent 수 비교","textPreview":"경로 주변 Agent 수 비교","textChars":16,"textLines":1,"bbox":[592,445,218,44]}
+{"kind":"shape","id":"sh/vm50rmhw","slide":8,"bbox":[850,402,76,30]}
+{"kind":"textbox","id":"sh/8jehw7yl","slide":8,"text":"공정","textPreview":"공정","textChars":2,"textLines":1,"bbox":[850,403,76,27]}
+{"kind":"textbox","id":"sh/9knypczq","slide":8,"text":"동점이면 Queue Sequence","textPreview":"동점이면 Queue Sequence","textChars":19,"textLines":1,"bbox":[850,445,218,44]}
+{"kind":"shape","id":"sh/mhczuhgf","slide":8,"bbox":[76,526,1008,94]}
+{"kind":"textbox","id":"sh/7ilgn2h0","slide":8,"text":"2초 WATCHDOG","textPreview":"2초 WATCHDOG","textChars":11,"textLines":1,"bbox":[104,548,180,25]}
+{"kind":"textbox","id":"sh/kfuhs7y9","slide":8,"text":"진행량 < 20 cm · 속도 < 10 cm/s가 지속되면 교착으로 판정","textPreview":"진행량 < 20 cm · 속도 < 10 cm/s가 지속되면 교착으로 판정","textChars":40,"textLines":1,"bbox":[292,542,710,30]}
+{"kind":"textbox","id":"sh/lg3ylczu","slide":8,"text":"실패 Slot 2초 재예약 제외 → 예약 반납 → Queue Sequence를 보존한 채 재시도","textPreview":"실패 Slot 2초 재예약 제외 → 예약 반납 → Queue Sequence를 보존한 채 재시도","textChars":53,"textLines":1,"bbox":[292,577,740,24]}
+{"kind":"textbox","id":"sh/pkjet8fm","slide":8,"text":"PROJECT BH · MONSTER MOVEMENT SYSTEM","textPreview":"PROJECT BH · MONSTER MOVEMENT SYSTEM","textChars":36,"textLines":1,"bbox":[64,684,600,16]}
+{"kind":"textbox","id":"sh/ojax03e1","slide":8,"text":"08","textPreview":"08","textChars":2,"textLines":1,"bbox":[1150,682,64,18]}
+{"kind":"notes","id":"nt/vf5lqr","slide":8,"text":"[Sources]\n- C:/UE5/ProjectBH/ProjectBH/기획/몬스터 이동 시스템 규칙.md — §12 Runtime 승격 규칙, §18 교착 감시와 복구\n- C:/UE5/ProjectBH/Source/ProjectBH/AI/BHCrowdEnemyAIController.h — StuckTimeout and progress thresholds\n- C:/UE5/ProjectBH/Source/ProjectBH/Components/Combat/CombatEngagementSlotComponent.cpp — promotion candidate scoring\n[/Sources]"}
+{"kind":"slide","id":"sl/rrq9sw","slide":9,"title":"08 · MOVEMENT QUALITY","textShapes":23}
+{"kind":"textbox","id":"sh/650zqpwn","slide":9,"text":"08 · MOVEMENT QUALITY","textPreview":"08 · MOVEMENT QUALITY","textChars":21,"textLines":1,"bbox":[64,36,420,22]}
+{"kind":"textbox","id":"sh/t8ri14vy","slide":9,"text":"‘정확한 자리’보다 ‘멈추지 않는 움직임’을 우선했다","textPreview":"‘정확한 자리’보다 ‘멈추지 않는 움직임’을 우선했다","textChars":29,"textLines":1,"bbox":[64,70,1110,64]}
+{"kind":"textbox","id":"sh/s7ihszet","slide":9,"text":"목적지 갱신·감속·회전의 타이밍을 분리해 타일처럼 끊기는 이동을 줄였다.","textPreview":"목적지 갱신·감속·회전의 타이밍을 분리해 타일처럼 끊기는 이동을 줄였다.","textChars":40,"textLines":1,"bbox":[64,132,1080,34]}
+{"kind":"shape","id":"sh/jipgvadw","slide":9,"bbox":[64,174,1152,0]}
+{"kind":"shape","id":"sh/ihgzmpwb","slide":9,"bbox":[64,212,548,410]}
+{"kind":"textbox","id":"sh/5kryxkv2","slide":9,"text":"PLAYER MOVES","textPreview":"PLAYER MOVES","textChars":12,"textLines":1,"bbox":[94,242,190,24]}
+{"kind":"shape","id":"sh/4jyhofeh","slide":9,"bbox":[118,350,386,0]}
+{"kind":"shape","id":"sh/vepgrad0","slide":9,"bbox":[140,328,44,44]}
+{"kind":"textbox","id":"sh/udgzi5wf","slide":9,"text":"t0","textPreview":"t0","textChars":2,"textLines":1,"bbox":[145,338,34,24]}
+{"kind":"shape","id":"sh/4rupgj21","slide":9,"bbox":[422,328,44,44]}
+{"kind":"textbox","id":"sh/ps369ojm","slide":9,"text":"t1","textPreview":"t1","textChars":2,"textLines":1,"bbox":[427,338,34,24]}
+{"kind":"shape","id":"sh/2pc7etkv","slide":9,"bbox":[184,350,236,0]}
+{"kind":"textbox","id":"sh/3qlo7e1g","slide":9,"text":"플레이어 이동","textPreview":"플레이어 이동","textChars":7,"textLines":1,"bbox":[256,316,120,22]}
+{"kind":"shape","id":"sh/gnupcj2p","slide":9,"bbox":[147,437,30,30]}
+{"kind":"shape","id":"sh/ho365oja","slide":9,"bbox":[325,437,30,30]}
+{"kind":"shape","id":"sh/uls7a9kz","slide":9,"bbox":[178,452,146,0]}
+{"kind":"textbox","id":"sh/vmlo3e1k","slide":9,"text":"Engagement Anchor","textPreview":"Engagement Anchor","textChars":17,"textLines":1,"bbox":[94,498,448,24]}
+{"kind":"textbox","id":"sh/0jepo3i9","slide":9,"text":"최대 175 cm 늦게 따라와 집단 군무를 완화\n플레이어가 멈추면 0.35초 후 중앙으로 복귀","textPreview":"최대 175 cm 늦게 따라와 집단 군무를 완화 | 플레이어가 멈추면 0.35초 후 중앙으로 복귀","textChars":52,"textLines":2,"bbox":[94,532,440,54]}
+{"kind":"shape","id":"sh/1knqh8ju","slide":9,"bbox":[650,226,28,28]}
+{"kind":"textbox","id":"sh/903618by","slide":9,"text":"1","textPreview":"1","textChars":1,"textLines":1,"bbox":[653,230,22,20]}
+{"kind":"textbox","id":"sh/8zap83ad","slide":9,"text":"가속 기반 이동","textPreview":"가속 기반 이동","textChars":8,"textLines":1,"bbox":[700,220,410,26]}
+{"kind":"textbox","id":"sh/ne1ozyts","slide":9,"text":"Path Following이 CharacterMovement 가속·감속 사용","textPreview":"Path Following이 CharacterMovement 가속·감속 사용","textChars":42,"textLines":1,"bbox":[700,252,450,44]}
+{"kind":"shape","id":"sh/mds76ts7","slide":9,"bbox":[650,322,28,28]}
+{"kind":"textbox","id":"sh/lcj6x8bm","slide":9,"text":"2","textPreview":"2","textChars":1,"textLines":1,"bbox":[653,326,22,20]}
+{"kind":"textbox","id":"sh/0bap43a1","slide":9,"text":"목표 재요청 제한","textPreview":"목표 재요청 제한","textChars":9,"textLines":1,"bbox":[700,316,410,26]}
+{"kind":"textbox","id":"sh/za1ovytw","slide":9,"text":"Wait 150 cm / Holding·Pending 250 cm 이동 시 갱신","textPreview":"Wait 150 cm / Holding·Pending 250 cm 이동 시 갱신","textChars":44,"textLines":1,"bbox":[700,348,450,44]}
+{"kind":"shape","id":"sh/y9s72tcb","slide":9,"bbox":[650,418,28,28]}
+{"kind":"textbox","id":"sh/d8j6tobq","slide":9,"text":"3","textPreview":"3","textChars":1,"textLines":1,"bbox":[653,422,22,20]}
+{"kind":"textbox","id":"sh/c7qp0ju5","slide":9,"text":"도착 판정 분리","textPreview":"도착 판정 분리","textChars":8,"textLines":1,"bbox":[700,412,410,26]}
+{"kind":"textbox","id":"sh/2do3ap83","slide":9,"text":"허용 반경 진입 → 감속 → 5 cm/s 이하에서 정지","textPreview":"허용 반경 진입 → 감속 → 5 cm/s 이하에서 정지","textChars":30,"textLines":1,"bbox":[700,444,450,44]}
+{"kind":"shape","id":"sh/3ex43u9o","slide":9,"bbox":[650,514,28,28]}
+{"kind":"textbox","id":"sh/4f6lczqt","slide":9,"text":"4","textPreview":"4","textChars":1,"textLines":1,"bbox":[653,518,22,20]}
+{"kind":"textbox","id":"sh/pgzm54re","slide":9,"text":"시선 규칙","textPreview":"시선 규칙","textChars":5,"textLines":1,"bbox":[700,508,410,26]}
+{"kind":"textbox","id":"sh/u9o365sr","slide":9,"text":"Formation에서는 Player Focus를 유지해 게걸음 표현","textPreview":"Formation에서는 Player Focus를 유지해 게걸음 표현","textChars":37,"textLines":1,"bbox":[700,540,450,44]}
+{"kind":"textbox","id":"sh/fax4za9c","slide":9,"text":"PROJECT BH · MONSTER MOVEMENT SYSTEM","textPreview":"PROJECT BH · MONSTER MOVEMENT SYSTEM","textChars":36,"textLines":1,"bbox":[64,684,600,16]}
+{"kind":"textbox","id":"sh/gb6l8fax","slide":9,"text":"09","textPreview":"09","textChars":2,"textLines":1,"bbox":[1150,682,64,18]}
+{"kind":"notes","id":"nt/rrq9sw","slide":9,"text":"[Sources]\n- C:/UE5/ProjectBH/ProjectBH/기획/몬스터 이동 시스템 규칙.md — §8 Engagement Anchor, §16 Move 요청 규칙\n- C:/UE5/ProjectBH/ProjectBH/작업 기록/2026-08-29 - 포위 범위 Player Focus 이동.md\n- C:/UE5/ProjectBH/ProjectBH/작업 기록/2026-08-29 - Wait Slot 도착 회전 전환 분리.md\n[/Sources]"}
+{"kind":"slide","id":"sl/zfemoi","slide":10,"title":"09 · LIFECYCLE","textShapes":20}
+{"kind":"textbox","id":"sh/gfu94f29","slide":10,"text":"09 · LIFECYCLE","textPreview":"09 · LIFECYCLE","textChars":14,"textLines":1,"bbox":[64,36,420,22]}
+{"kind":"textbox","id":"sh/vel8balo","slide":10,"text":"죽음도 이동 시스템의 자원 순환에 포함된다","textPreview":"죽음도 이동 시스템의 자원 순환에 포함된다","textChars":23,"textLines":1,"bbox":[64,70,1110,64]}
+{"kind":"textbox","id":"sh/udcr25k3","slide":10,"text":"시체 연출을 보존하면서 활성 Enemy 수를 제한하는 Object Pool 정책을 설계했다.","textPreview":"시체 연출을 보존하면서 활성 Enemy 수를 제한하는 Object Pool 정책을 설계했다.","textChars":51,"textLines":1,"bbox":[64,132,1080,34]}
+{"kind":"shape","id":"sh/5knqhk3q","slide":10,"bbox":[64,174,1152,0]}
+{"kind":"shape","id":"sh/4je98f25","slide":10,"bbox":[72,250,218,220]}
+{"kind":"shape","id":"sh/3i58falk","slide":10,"bbox":[93,269,42,42]}
+{"kind":"textbox","id":"sh/ihwr65kf","slide":10,"text":"1","textPreview":"1","textChars":1,"textLines":1,"bbox":[99,277,30,26]}
+{"kind":"textbox","id":"sh/donal432","slide":10,"text":"ALIVE","textPreview":"ALIVE","textChars":5,"textLines":1,"bbox":[96,334,170,28]}
+{"kind":"textbox","id":"sh/sne9cz2h","slide":10,"text":"Slot 점유\n추격·포위·공격","textPreview":"Slot 점유 | 추격·포위·공격","textChars":16,"textLines":2,"bbox":[96,382,170,58]}
+{"kind":"shape","id":"sh/edgny1k7","slide":10,"bbox":[334,250,218,220]}
+{"kind":"shape","id":"sh/zep4761s","slide":10,"bbox":[355,269,42,42]}
+{"kind":"textbox","id":"sh/0fy50bid","slide":10,"text":"2","textPreview":"2","textChars":1,"textLines":1,"bbox":[361,277,30,26]}
+{"kind":"textbox","id":"sh/107m9wji","slide":10,"text":"CORPSE","textPreview":"CORPSE","textChars":6,"textLines":1,"bbox":[358,334,170,28]}
+{"kind":"textbox","id":"sh/m1gn2103","slide":10,"text":"사망 Montage 마지막 포즈\n현장에 시체 유지","textPreview":"사망 Montage 마지막 포즈 | 현장에 시체 유지","textChars":27,"textLines":2,"bbox":[358,382,170,58]}
+{"kind":"shape","id":"sh/n29ob61o","slide":10,"bbox":[596,250,218,220]}
+{"kind":"shape","id":"sh/o3i54bi9","slide":10,"bbox":[617,269,42,42]}
+{"kind":"textbox","id":"sh/94r6dgju","slide":10,"text":"3","textPreview":"3","textChars":1,"textLines":1,"bbox":[623,277,30,26]}
+{"kind":"textbox","id":"sh/25wnqhkz","slide":10,"text":"RECYCLE","textPreview":"RECYCLE","textChars":7,"textLines":1,"bbox":[620,334,170,28]}
+{"kind":"textbox","id":"sh/3654zm1k","slide":10,"text":"비활성 여분이 없을 때\n가장 오래된 시체 회수","textPreview":"비활성 여분이 없을 때 | 가장 오래된 시체 회수","textChars":25,"textLines":2,"bbox":[620,382,170,58]}
+{"kind":"shape","id":"sh/7e1sbed0","slide":10,"bbox":[858,250,218,220]}
+{"kind":"shape","id":"sh/md8bi9wf","slide":10,"bbox":[879,269,42,42]}
+{"kind":"textbox","id":"sh/90jadov6","slide":10,"text":"4","textPreview":"4","textChars":1,"textLines":1,"bbox":[885,277,30,26]}
+{"kind":"textbox","id":"sh/8zatkjel","slide":10,"text":"RESPAWN","textPreview":"RESPAWN","textChars":7,"textLines":1,"bbox":[882,334,170,28]}
+{"kind":"textbox","id":"sh/zahs7ed4","slide":10,"text":"등록 Spawn Point에서\nEnemy 재활성화","textPreview":"등록 Spawn Point에서 | Enemy 재활성화","textChars":27,"textLines":2,"bbox":[882,382,170,58]}
+{"kind":"shape","id":"sh/y98be9wj","slide":10,"bbox":[290,360,44,0]}
+{"kind":"shape","id":"sh/lcza94vu","slide":10,"bbox":[552,360,44,0]}
+{"kind":"shape","id":"sh/kbqtgje9","slide":10,"bbox":[814,360,44,0]}
+{"kind":"shape","id":"sh/j6lcjyd8","slide":10,"bbox":[72,526,1004,92]}
+{"kind":"textbox","id":"sh/i5sbqtcn","slide":10,"text":"연출과 최적화의 타협","textPreview":"연출과 최적화의 타협","textChars":11,"textLines":1,"bbox":[100,548,230,25]}
+{"kind":"textbox","id":"sh/0bmpkvu5","slide":10,"text":"‘5초 뒤 삭제’가 아니라, 새 Enemy가 필요해질 때만 시체를 Pool로 돌려보낸다.","textPreview":"‘5초 뒤 삭제’가 아니라, 새 Enemy가 필요해질 때만 시체를 Pool로 돌려보낸다.","textChars":49,"textLines":1,"bbox":[340,540,704,42]}
+{"kind":"textbox","id":"sh/1cvqd0bq","slide":10,"text":"사망·경직 시 Slot 반납은 즉시 처리해 대형 교착을 방지","textPreview":"사망·경직 시 Slot 반납은 즉시 처리해 대형 교착을 방지","textChars":33,"textLines":1,"bbox":[340,585,680,22]}
+{"kind":"textbox","id":"sh/e947ilcz","slide":10,"text":"PROJECT BH · MONSTER MOVEMENT SYSTEM","textPreview":"PROJECT BH · MONSTER MOVEMENT SYSTEM","textChars":36,"textLines":1,"bbox":[64,684,600,16]}
+{"kind":"textbox","id":"sh/fad8bqtk","slide":10,"text":"10","textPreview":"10","textChars":2,"textLines":1,"bbox":[1150,682,64,18]}
+{"kind":"notes","id":"nt/zfemoi","slide":10,"text":"[Sources]\n- C:/UE5/ProjectBH/ProjectBH/기획/몬스터 이동 시스템 규칙.md — §4.6 EnemyPoolManager, §19 Object Pool\n- C:/UE5/ProjectBH/Source/ProjectBH/Enemies/BHEnemyPoolManager.cpp\n- C:/UE5/ProjectBH/Source/ProjectBH/Enemies/BHEnemy.cpp — death cleanup and pool handoff\n[/Sources]"}
+{"kind":"slide","id":"sl/kcv766","slide":11,"title":"10 · IMPLEMENTATION","textShapes":23}
+{"kind":"textbox","id":"sh/hcbypwfi","slide":11,"text":"10 · IMPLEMENTATION","textPreview":"10 · IMPLEMENTATION","textChars":19,"textLines":1,"bbox":[64,36,420,22]}
+{"kind":"textbox","id":"sh/u90zuhg7","slide":11,"text":"규칙을 코드·데이터·디버그 표면으로 연결했다","textPreview":"규칙을 코드·데이터·디버그 표면으로 연결했다","textChars":24,"textLines":1,"bbox":[64,70,1110,64]}
+{"kind":"textbox","id":"sh/fatgnmxc","slide":11,"text":"에디터에서 조정 가능한 수치와 런타임 가시화를 함께 제공한다.","textPreview":"에디터에서 조정 가능한 수치와 런타임 가시화를 함께 제공한다.","textChars":34,"textLines":1,"bbox":[64,132,1080,34]}
+{"kind":"shape","id":"sh/4f2h0by9","slide":11,"bbox":[64,174,1152,0]}
+{"kind":"textbox","id":"sh/pgbitwfu","slide":11,"text":"구성 요소","textPreview":"구성 요소","textChars":5,"textLines":1,"bbox":[74,214,300,22]}
+{"kind":"textbox","id":"sh/2dkzy1g3","slide":11,"text":"책임","textPreview":"책임","textChars":2,"textLines":1,"bbox":[410,214,588,22]}
+{"kind":"textbox","id":"sh/3etgr6xo","slide":11,"text":"표면","textPreview":"표면","textChars":2,"textLines":1,"bbox":[1052,214,90,22]}
+{"kind":"shape","id":"sh/kjiho7yp","slide":11,"bbox":[64,248,1088,56]}
+{"kind":"textbox","id":"sh/5kryhcfa","slide":11,"text":"CombatEngagementSlotComponent","textPreview":"CombatEngagementSlotComponent","textChars":29,"textLines":1,"bbox":[82,264,310,26]}
+{"kind":"textbox","id":"sh/5kryxs7u","slide":11,"text":"공간 분석 · Slot 예약 · Queue · 승격 · 대형 변환","textPreview":"공간 분석 · Slot 예약 · Queue · 승격 · 대형 변환","textChars":36,"textLines":1,"bbox":[410,264,598,26]}
+{"kind":"shape","id":"sh/4jih4n69","slide":11,"bbox":[1040,261,82,30]}
+{"kind":"textbox","id":"sh/ji9gvipo","slide":11,"text":"C++","textPreview":"C++","textChars":3,"textLines":1,"bbox":[1040,262,82,27]}
+{"kind":"shape","id":"sh/ixgz2do3","slide":11,"bbox":[64,318,1088,56]}
+{"kind":"textbox","id":"sh/tory1s7q","slide":11,"text":"BHCrowdEnemyAIController","textPreview":"BHCrowdEnemyAIController","textChars":24,"textLines":1,"bbox":[82,334,310,26]}
+{"kind":"textbox","id":"sh/snih8n65","slide":11,"text":"추격 · Move 요청 · Detour Crowd · Watchdog · Facing","textPreview":"추격 · Move 요청 · Detour Crowd · Watchdog · Facing","textChars":47,"textLines":1,"bbox":[410,334,598,26]}
+{"kind":"shape","id":"sh/rm9gz2p0","slide":11,"bbox":[1040,331,82,30]}
+{"kind":"textbox","id":"sh/6l0z6xof","slide":11,"text":"C++","textPreview":"C++","textChars":3,"textLines":1,"bbox":[1040,332,82,27]}
+{"kind":"shape","id":"sh/1sby5c72","slide":11,"bbox":[64,388,1088,56]}
+{"kind":"textbox","id":"sh/gr2hc76h","slide":11,"text":"BHEnemyPoolManager","textPreview":"BHEnemyPoolManager","textChars":18,"textLines":1,"bbox":[82,404,310,26]}
+{"kind":"textbox","id":"sh/07u9ofip","slide":11,"text":"활성 상한 · 시체 목록 · 회수 · Spawn Point 재활성화","textPreview":"활성 상한 · 시체 목록 · 회수 · Spawn Point 재활성화","textChars":37,"textLines":1,"bbox":[410,404,598,26]}
+{"kind":"shape","id":"sh/l83axkja","slide":11,"bbox":[1040,401,82,30]}
+{"kind":"textbox","id":"sh/y5srm50z","slide":11,"text":"C++","textPreview":"C++","textChars":3,"textLines":1,"bbox":[1040,402,82,27]}
+{"kind":"shape","id":"sh/z61sva14","slide":11,"bbox":[64,458,1088,56]}
+{"kind":"textbox","id":"sh/8bu9sfi1","slide":11,"text":"Enemy Data Asset","textPreview":"Enemy Data Asset","textChars":16,"textLines":1,"bbox":[82,474,310,26]}
+{"kind":"textbox","id":"sh/9w3a1kjm","slide":11,"text":"기본 이동·공격 수치와 에셋 의존성","textPreview":"기본 이동·공격 수치와 에셋 의존성","textChars":19,"textLines":1,"bbox":[410,474,598,26]}
+{"kind":"shape","id":"sh/m9crqp0v","slide":11,"bbox":[1040,471,82,30]}
+{"kind":"textbox","id":"sh/nalsza1g","slide":11,"text":"DATA","textPreview":"DATA","textChars":4,"textLines":1,"bbox":[1040,472,82,27]}
+{"kind":"shape","id":"sh/ofq9gvih","slide":11,"bbox":[64,558,1088,76]}
+{"kind":"textbox","id":"sh/pgjap0j2","slide":11,"text":"RUNTIME DEBUG","textPreview":"RUNTIME DEBUG","textChars":13,"textLines":1,"bbox":[86,577,170,22]}
+{"kind":"textbox","id":"sh/rupcvylk","slide":11,"text":"bh.Debug.Enabled · Slots · Crowd · Pool","textPreview":"bh.Debug.Enabled · Slots · Crowd · Pool","textChars":39,"textLines":1,"bbox":[266,572,512,28]}
+{"kind":"textbox","id":"sh/6tgv2tkf","slide":11,"text":"빌드: UE 5.7 Development Editor 성공","textPreview":"빌드: UE 5.7 Development Editor 성공","textChars":32,"textLines":1,"bbox":[800,574,320,26]}
+{"kind":"textbox","id":"sh/tw7ux8jq","slide":11,"text":"PROJECT BH · MONSTER MOVEMENT SYSTEM","textPreview":"PROJECT BH · MONSTER MOVEMENT SYSTEM","textChars":36,"textLines":1,"bbox":[64,684,600,16]}
+{"kind":"textbox","id":"sh/svyd4325","slide":11,"text":"11","textPreview":"11","textChars":2,"textLines":1,"bbox":[1150,682,64,18]}
+{"kind":"notes","id":"nt/kcv766","slide":11,"text":"[Sources]\n- C:/UE5/ProjectBH/Source/ProjectBH/Components/Combat/CombatEngagementSlotComponent.cpp\n- C:/UE5/ProjectBH/Source/ProjectBH/AI/BHCrowdEnemyAIController.cpp\n- C:/UE5/ProjectBH/Source/ProjectBH/Enemies/BHEnemyPoolManager.cpp\n- C:/UE5/ProjectBH/ProjectBH/작업 기록/2026-08-29 - 런타임 디버그 표시 토글 구현.md\n- C:/UE5/ProjectBH/ProjectBH/작업 기록/2026-08-30 - Attack Slot 5개 및 양방향 Corridor 구현.md — build result\n[/Sources]"}
+{"kind":"slide","id":"sl/5kpmr2","slide":12,"title":"11 · VALIDATION & NEXT","textShapes":20}
+{"kind":"textbox","id":"sh/buhwv2pk","slide":12,"text":"11 · VALIDATION & NEXT","textPreview":"11 · VALIDATION & NEXT","textChars":22,"textLines":1,"bbox":[64,42,400,22]}
+{"kind":"textbox","id":"sh/cfqx47q5","slide":12,"text":"구현은 끝이 아니라,\n행동 품질을 증명하는 단계로 이어진다","textPreview":"구현은 끝이 아니라, | 행동 품질을 증명하는 단계로 이어진다","textChars":32,"textLines":2,"bbox":[64,86,760,120]}
+{"kind":"shape","id":"sh/xgzexc7q","slide":12,"bbox":[64,254,340,292]}
+{"kind":"textbox","id":"sh/2pofyx83","slide":12,"text":"검증 축","textPreview":"검증 축","textChars":4,"textLines":1,"bbox":[88,278,280,30]}
+{"kind":"shape","id":"sh/nqxwr2po","slide":12,"bbox":[91,335,10,10]}
+{"kind":"textbox","id":"sh/or6x07qt","slide":12,"text":"4 → 8 → 12 → 30+ Enemy","textPreview":"4 → 8 → 12 → 30+ Enemy","textChars":22,"textLines":1,"bbox":[114,328,260,28]}
+{"kind":"shape","id":"sh/psfetc7e","slide":12,"bbox":[91,381,10,10]}
+{"kind":"textbox","id":"sh/mlsfa187","slide":12,"text":"Open / Corridor / Pocket","textPreview":"Open / Corridor / Pocket","textChars":24,"textLines":1,"bbox":[114,374,260,28]}
+{"kind":"shape","id":"sh/7m1g3mps","slide":12,"bbox":[91,427,10,10]}
+{"kind":"textbox","id":"sh/v21c3ip4","slide":12,"text":"플레이어 이동·정지·구석","textPreview":"플레이어 이동·정지·구석","textChars":13,"textLines":1,"bbox":[114,420,260,28]}
+{"kind":"shape","id":"sh/a1svudoj","slide":12,"bbox":[91,473,10,10]}
+{"kind":"textbox","id":"sh/x4ju5s7a","slide":12,"text":"사망·경직·교착·재스폰","textPreview":"사망·경직·교착·재스폰","textChars":12,"textLines":1,"bbox":[114,466,260,28]}
+{"kind":"shape","id":"sh/w3adwn6p","slide":12,"bbox":[438,254,340,292]}
+{"kind":"textbox","id":"sh/j61c7ip0","slide":12,"text":"현재 상태","textPreview":"현재 상태","textChars":5,"textLines":1,"bbox":[462,278,280,30]}
+{"kind":"shape","id":"sh/i5svyxof","slide":12,"bbox":[465,335,10,10]}
+{"kind":"textbox","id":"sh/583u9s76","slide":12,"text":"핵심 이동·예약 로직 구현","textPreview":"핵심 이동·예약 로직 구현","textChars":14,"textLines":1,"bbox":[488,328,260,28]}
+{"kind":"shape","id":"sh/k7ad0n6l","slide":12,"bbox":[465,381,10,10]}
+{"kind":"textbox","id":"sh/7ulcb2pc","slide":12,"text":"런타임 디버그 토글 제공","textPreview":"런타임 디버그 토글 제공","textChars":13,"textLines":1,"bbox":[488,374,260,28]}
+{"kind":"shape","id":"sh/69cv2xor","slide":12,"bbox":[465,427,10,10]}
+{"kind":"textbox","id":"sh/21g7qlcb","slide":12,"text":"UE 5.7 에디터 빌드 성공","textPreview":"UE 5.7 에디터 빌드 성공","textChars":16,"textLines":1,"bbox":[488,420,260,28]}
+{"kind":"shape","id":"sh/32pojqdw","slide":12,"bbox":[465,473,10,10]}
+{"kind":"textbox","id":"sh/o3ypsvu1","slide":12,"text":"최신 대형은 PIE 검증 필요","textPreview":"최신 대형은 PIE 검증 필요","textChars":16,"textLines":1,"bbox":[488,466,260,28]}
+{"kind":"shape","id":"sh/p476l0vm","slide":12,"bbox":[812,254,340,292]}
+{"kind":"textbox","id":"sh/edgnmlcz","slide":12,"text":"포트폴리오 증거","textPreview":"포트폴리오 증거","textChars":8,"textLines":1,"bbox":[836,278,280,30]}
+{"kind":"shape","id":"sh/fepofqdk","slide":12,"bbox":[839,335,10,10]}
+{"kind":"textbox","id":"sh/gzypovu5","slide":12,"text":"대형 전환 전후 영상","textPreview":"대형 전환 전후 영상","textChars":11,"textLines":1,"bbox":[862,328,260,28]}
+{"kind":"shape","id":"sh/1076h0vq","slide":12,"bbox":[839,381,10,10]}
+{"kind":"textbox","id":"sh/y907ypcj","slide":12,"text":"Slot/Queue 디버그 오버레이","textPreview":"Slot/Queue 디버그 오버레이","textChars":19,"textLines":1,"bbox":[862,374,260,28]}
+{"kind":"shape","id":"sh/za9orado","slide":12,"bbox":[839,427,10,10]}
+{"kind":"textbox","id":"sh/94vahof6","slide":12,"text":"실패 재현과 개선 비교","textPreview":"실패 재현과 개선 비교","textChars":12,"textLines":1,"bbox":[862,420,260,28]}
+{"kind":"shape","id":"sh/8329ojel","slide":12,"bbox":[839,473,10,10]}
+{"kind":"textbox","id":"sh/72tsfex0","slide":12,"text":"성능·혼잡 지표 캡처","textPreview":"성능·혼잡 지표 캡처","textChars":11,"textLines":1,"bbox":[862,466,260,28]}
+{"kind":"shape","id":"sh/m1krm9wf","slide":12,"bbox":[64,584,1088,70]}
+{"kind":"textbox","id":"sh/l0bqd4fu","slide":12,"text":"PORTFOLIO THESIS","textPreview":"PORTFOLIO THESIS","textChars":16,"textLines":1,"bbox":[88,606,170,22]}
+{"kind":"textbox","id":"sh/kz29kze9","slide":12,"text":"길찾기는 엔진에 맡기고, ‘몬스터 떼가 어떻게 행동할지’는 직접 설계했다.","textPreview":"길찾기는 엔진에 맡기고, ‘몬스터 떼가 어떻게 행동할지’는 직접 설계했다.","textChars":41,"textLines":1,"bbox":[272,596,844,34]}
+{"kind":"textbox","id":"sh/zyt8bux4","slide":12,"text":"12","textPreview":"12","textChars":2,"textLines":1,"bbox":[1160,680,54,18]}
+{"kind":"notes","id":"nt/5kpmr2","slide":12,"text":"최신 Corridor 양방향 및 Pocket 대형은 코드 구현과 에디터 빌드는 완료됐으나, 실제 플레이 품질은 PIE 영상과 디버그 오버레이로 추가 증명한다.\n\n[Sources]\n- C:/UE5/ProjectBH/ProjectBH/기획/몬스터 이동 시스템 규칙.md — §25 검증 체크리스트 and 현행 주의사항\n- C:/UE5/ProjectBH/ProjectBH/작업 기록/2026-08-30 - Attack Slot 5개 및 양방향 Corridor 구현.md — PIE verification list\n[/Sources]"}

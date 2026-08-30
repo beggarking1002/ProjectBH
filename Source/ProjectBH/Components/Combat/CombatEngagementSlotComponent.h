@@ -31,7 +31,8 @@ UENUM(BlueprintType)
 enum class EBHCombatSpaceMode : uint8
 {
 	Open,
-	Corridor
+	Corridor,
+	Pocket
 };
 
 /**
@@ -128,7 +129,7 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Combat|Space Analysis")
 	FVector GetEstimatedCorridorAxis() const { return EstimatedCorridorAxis; }
 
-	/** Attack slots currently usable by the active Open/Corridor formation. */
+	/** Attack slots currently usable by the active Open/Corridor/Pocket formation. */
 	UFUNCTION(BlueprintPure, Category = "Combat|Space Analysis")
 	int32 GetActiveAttackSlotCount() const;
 
@@ -136,9 +137,13 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Combat|Space Analysis")
 	int32 GetCorridorLaneForRequester(AActor* Requester) const;
 
+	/** Stable axis side used by the active two-sided Corridor formation. */
+	UFUNCTION(BlueprintPure, Category = "Combat|Space Analysis")
+	int32 GetCorridorSideForRequester(AActor* Requester) const;
+
 protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Engagement Slots", meta = (ClampMin = "1", UIMin = "1"))
-	int32 AttackSlotCount = 4;
+	int32 AttackSlotCount = 5;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Engagement Slots", meta = (ClampMin = "1", UIMin = "1"))
 	int32 WaitSlotCount = 8;
@@ -152,14 +157,14 @@ protected:
 	float AttackRingRadius = 125.0f;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Engagement Slots", meta = (ClampMin = "0.0", Units = "cm"))
-	float WaitRingRadius = 300.0f;
+	float WaitRingRadius = 250.0f;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Engagement Slots", meta = (ClampMin = "0.0", Units = "cm"))
-	float HoldingRingRadius = 500.0f;
+	float HoldingRingRadius = 400.0f;
 
 	/** First overflow radius used by queued enemies beyond Holding capacity. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Pending Queue", meta = (ClampMin = "0.0", Units = "cm"))
-	float PendingRingRadius = 700.0f;
+	float PendingRingRadius = 575.0f;
 
 	/** Number of deterministic pending positions per overflow ring. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Pending Queue", meta = (ClampMin = "1", UIMin = "1"))
@@ -269,7 +274,37 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Space Analysis", meta = (ClampMin = "0.0", Units = "s"))
 	float CorridorExitDuration = 1.0f;
 
-	/** Converts ring slots to a rear-facing column while stable Corridor mode is active. */
+	/** Probe clearance required for a direction to belong to a broad Pocket opening. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Space Analysis", meta = (ClampMin = "100.0", Units = "cm"))
+	float PocketOpenProbeClearance = 350.0f;
+
+	/** Nearby blocked-probe distance used to distinguish a wall or corner from a remote NavMesh edge. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Space Analysis", meta = (ClampMin = "0.0", Units = "cm"))
+	float PocketNearbyWallDistance = 200.0f;
+
+	/** Minimum fraction of probes that must hit a nearby wall before entering Pocket mode. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Space Analysis", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float PocketEnterBlockedFraction = 0.2f;
+
+	/** Lower nearby-wall threshold used while already in Pocket mode. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Space Analysis", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float PocketExitBlockedFraction = 0.1f;
+
+	/** Broad contiguous opening required to distinguish a wall/corner pocket from a narrow corridor. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Space Analysis", meta = (ClampMin = "0.0", ClampMax = "360.0", Units = "deg"))
+	float PocketEnterMinimumOpenArc = 90.0f;
+
+	/** Lower open-arc threshold used while already in Pocket mode. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Space Analysis", meta = (ClampMin = "0.0", ClampMax = "360.0", Units = "deg"))
+	float PocketExitMinimumOpenArc = 67.5f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Space Analysis", meta = (ClampMin = "0.0", Units = "s"))
+	float PocketEnterDuration = 0.4f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Space Analysis", meta = (ClampMin = "0.0", Units = "s"))
+	float PocketExitDuration = 0.6f;
+
+	/** Converts ring slots to two axis-facing columns while stable Corridor mode is active. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Corridor Formation")
 	bool bEnableCorridorFormation = true;
 
@@ -293,7 +328,7 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Corridor Formation", meta = (ClampMin = "1", ClampMax = "4", UIMin = "1", UIMax = "4"))
 	int32 CorridorMaximumLaneCount = 2;
 
-	/** Maximum half-angle used by the one-sided Attack arc in a corridor. */
+	/** Maximum half-angle used by each side's Attack arc in a corridor. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Corridor Formation", meta = (ClampMin = "0.0", ClampMax = "89.0", Units = "deg"))
 	float CorridorAttackArcHalfAngle = 70.0f;
 
@@ -304,6 +339,26 @@ protected:
 	/** Notify every reserved Enemy after the smoothed corridor direction turns this far. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Corridor Formation", meta = (ClampMin = "1.0", ClampMax = "90.0", Units = "deg"))
 	float CorridorFormationRepathAngle = 15.0f;
+
+	/** Maximum half-angle occupied by Pocket slots inside the detected open arc. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Pocket Formation", meta = (ClampMin = "10.0", ClampMax = "170.0", Units = "deg"))
+	float PocketMaximumArcHalfAngle = 80.0f;
+
+	/** Desired center-to-center spacing along each Pocket arc row. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Pocket Formation", meta = (ClampMin = "1.0", Units = "cm"))
+	float PocketSlotSpacing = 95.0f;
+
+	/** Radial spacing used when one Pocket arc cannot hold an entire layer. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Pocket Formation", meta = (ClampMin = "1.0", Units = "cm"))
+	float PocketRowSpacing = 100.0f;
+
+	/** Smoothing applied while the detected Pocket opening direction changes. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Pocket Formation", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float PocketDirectionFollowAlpha = 0.35f;
+
+	/** Repath reserved enemies after the smoothed Pocket direction turns this far. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Pocket Formation", meta = (ClampMin = "1.0", ClampMax = "90.0", Units = "deg"))
+	float PocketFormationRepathAngle = 15.0f;
 
 	/** A queued enemy must be this close to its current ring slot before central promotion. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Engagement Queue", meta = (ClampMin = "0.0", Units = "cm"))
@@ -337,15 +392,24 @@ private:
 	void AnalyzeCombatSpace(float SampleDeltaTime);
 	void HandleCombatSpaceModeChanged(EBHCombatSpaceMode PreviousMode);
 	void UpdateCorridorFormationDirection();
+	void UpdatePocketFormationDirection();
 	void RefreshCorridorFormationCapacity();
+	void RefreshPocketFormationCapacity();
 	void ReconcileCorridorAttackReservations();
+	bool ReconcilePocketAttackReservations();
 	void RepackCorridorLayerReservations(
 		TArray<TWeakObjectPtr<AActor>>& Reservations,
 		EBHCombatSlotType SlotType,
 		bool bNotifyMovedRequesters);
 	void RepackAllCorridorQueueLayers(bool bNotifyMovedRequesters);
+	void AssignCorridorSideIndices(bool bResetExistingAssignments);
 	int32 GetLockedAttackReservationCount() const;
 	int32 GetCorridorLaneIndex(AActor* Requester) const;
+	int32 GetCorridorSideIndex(AActor* Requester) const;
+	int32 GetCorridorQueueChannelIndex(AActor* Requester) const;
+	int32 GetCorridorQueueChannelCount() const;
+	int32 GetCorridorAttackSlotSideIndex(int32 AttackSlotIndex) const;
+	int32 GetCorridorAttackSlotChannelIndex(int32 AttackSlotIndex) const;
 	bool HasFreeCorridorLaneSlot(
 		const TArray<TWeakObjectPtr<AActor>>& Reservations,
 		int32 LaneIndex) const;
@@ -367,11 +431,22 @@ private:
 		int32& OutWaitSlotIndex) const;
 	FVector ResolveCorridorRearDirection(const FVector& UnsignedAxis) const;
 	bool IsCorridorFormationActive() const;
+	bool IsPocketFormationActive() const;
 	int32 CalculateCorridorLaneCount(float CorridorWidth) const;
 	int32 CalculateCorridorAttackSlotCount(float CorridorWidth) const;
+	int32 CalculatePocketAttackSlotCount() const;
 	float GetCorridorLayerStartDistance(EBHCombatSlotType SlotType) const;
 	bool GetCorridorSlotWorldLocation(EBHCombatSlotType SlotType, int32 SlotIndex, FVector& OutWorldLocation) const;
 	bool GetCorridorPendingWorldLocation(int32 PendingIndex, FVector& OutWorldLocation) const;
+	bool GetPocketSlotWorldLocation(EBHCombatSlotType SlotType, int32 SlotIndex, FVector& OutWorldLocation) const;
+	bool GetPocketPendingWorldLocation(int32 PendingIndex, FVector& OutWorldLocation) const;
+	bool GetPocketFanWorldLocation(
+		const FVector& Center,
+		float BaseRadius,
+		int32 SlotIndex,
+		int32 SlotCount,
+		bool bAllowMultipleRows,
+		FVector& OutWorldLocation) const;
 	void UpdateEngagementAnchor(float DeltaTime);
 	void PruneInvalidReservations();
 	void RefreshInitialFormationPhase();
@@ -433,6 +508,7 @@ private:
 		TWeakObjectPtr<AActor> Requester;
 		uint64 Sequence = 0;
 		float AttackEligibleTime = 0.0f;
+		int32 CorridorSideIndex = INDEX_NONE;
 	};
 	TArray<FEngagementQueueEntry> EngagementQueue;
 	uint64 NextQueueSequence = 1;
@@ -456,12 +532,19 @@ private:
 	float EstimatedCorridorAxisLength = 0.0f;
 	float EstimatedCorridorAspectRatio = 0.0f;
 	FVector EstimatedCorridorAxis = FVector::ForwardVector;
+	float EstimatedPocketOpenArc = 0.0f;
+	float EstimatedPocketBlockedFraction = 0.0f;
+	FVector EstimatedPocketOpenDirection = FVector::ForwardVector;
 	FVector CorridorFormationRearDirection = -FVector::ForwardVector;
 	FVector LastNotifiedCorridorDirection = -FVector::ForwardVector;
+	FVector PocketFormationDirection = FVector::ForwardVector;
+	FVector LastNotifiedPocketDirection = FVector::ForwardVector;
 	FVector SpaceProbeOrigin = FVector::ZeroVector;
 	int32 ActiveCorridorLaneCount = 1;
 	int32 ActiveCorridorAttackSlotCount = 1;
 	int32 DesiredCorridorAttackSlotCount = 1;
+	int32 ActivePocketAttackSlotCount = 1;
+	int32 DesiredPocketAttackSlotCount = 1;
 	int32 CorridorAxisProbeIndex = INDEX_NONE;
 	int32 CorridorWidthProbeIndex = INDEX_NONE;
 	TArray<FVector> SpaceProbeEndpoints;
