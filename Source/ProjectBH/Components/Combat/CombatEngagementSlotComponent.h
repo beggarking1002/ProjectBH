@@ -473,9 +473,13 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Engagement Slots")
 	FVector NavProjectionExtent = FVector(50.0f, 50.0f, 200.0f);
 
-	/** Reassigns occupied slots within each ring after the owner moves this far from the last reform anchor. */
+	/** Re-evaluates occupied slot ownership after the player or delayed engagement anchor moves this far. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Engagement Slots", meta = (ClampMin = "0.0", Units = "cm"))
-	float ReformTriggerDistance = 0.0f;
+	float ReformTriggerDistance = 75.0f;
+
+	/** A two-enemy slot swap must reduce their combined remaining travel by at least this much. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Engagement Slots", meta = (ClampMin = "0.0", Units = "cm"))
+	float ReformMinimumTravelSaving = 75.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Debug|Engagement Slots")
 	bool bDrawDebugSlots = true;
@@ -689,6 +693,7 @@ private:
 	float EngagementAnchorStoppedElapsed = 0.0f;
 	bool bEngagementAnchorRecentering = false;
 	FVector LastReformOwnerLocation = FVector::ZeroVector;
+	FVector LastReformAnchorLocation = FVector::ZeroVector;
 	int32 FormationRevision = 0;
 	int32 CurrentSpacingViolationCount = 0;
 	int32 PeakSpacingViolationCount = 0;

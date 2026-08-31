@@ -27,6 +27,7 @@ void UCombatEngagementSlotComponent::BeginPlay()
 	InitializeSlots();
 	EngagementAnchorLocation = GetOwner() ? GetOwner()->GetActorLocation() : FVector::ZeroVector;
 	LastReformOwnerLocation = EngagementAnchorLocation;
+	LastReformAnchorLocation = EngagementAnchorLocation;
 }
 
 void UCombatEngagementSlotComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
@@ -4149,12 +4150,20 @@ void UCombatEngagementSlotComponent::TryReformFormation()
 	}
 
 	const FVector OwnerLocation = Owner->GetActorLocation();
-	if (FVector::DistSquared2D(LastReformOwnerLocation, OwnerLocation) < FMath::Square(ReformTriggerDistance))
+	const float TriggerDistanceSquared = FMath::Square(ReformTriggerDistance);
+	const bool bOwnerMovedEnough = FVector::DistSquared2D(
+		LastReformOwnerLocation,
+		OwnerLocation) >= TriggerDistanceSquared;
+	const bool bAnchorMovedEnough = FVector::DistSquared2D(
+		LastReformAnchorLocation,
+		EngagementAnchorLocation) >= TriggerDistanceSquared;
+	if (!bOwnerMovedEnough && !bAnchorMovedEnough)
 	{
 		return;
 	}
 
 	LastReformOwnerLocation = OwnerLocation;
+	LastReformAnchorLocation = EngagementAnchorLocation;
 	ReformReservations();
 }
 
@@ -4163,7 +4172,9 @@ void UCombatEngagementSlotComponent::ReformReservations()
 	if (IsCorridorFormationActive())
 	{
 		ReconcileCorridorAttackReservations();
-		RepackAllCorridorQueueLayers(true);
+		ReformRingReservations(AttackReservations, EBHCombatSlotType::Attack);
+		ReformRingReservations(WaitReservations, EBHCombatSlotType::Wait);
+		ReformRingReservations(HoldingReservations, EBHCombatSlotType::Holding);
 		++FormationRevision;
 		NotifyAllReservedRequestersSlotChanged();
 		return;
@@ -4188,78 +4199,88 @@ void UCombatEngagementSlotComponent::ReformRingReservations(
 	EBHCombatSlotType SlotType)
 {
 	TArray<FVector, TInlineAllocator<16>> SlotLocations;
-	SlotLocations.Reserve(Reservations.Num());
+	SlotLocations.SetNum(Reservations.Num());
 	for (int32 SlotIndex = 0; SlotIndex < Reservations.Num(); ++SlotIndex)
 	{
-		FVector SlotLocation;
-		if (!GetSlotWorldLocation(SlotType, SlotIndex, SlotLocation))
+		if (!GetSlotWorldLocation(SlotType, SlotIndex, SlotLocations[SlotIndex]))
 		{
 			return;
 		}
-		SlotLocations.Add(SlotLocation);
 	}
 
-	TArray<TWeakObjectPtr<AActor>, TInlineAllocator<16>> Requesters;
-	TArray<int32, TInlineAllocator<16>> AvailableSlotIndices;
-	for (int32 SlotIndex = 0; SlotIndex < Reservations.Num(); ++SlotIndex)
+	const auto IsLockedReservation = [SlotType](const AActor* Requester)
 	{
-		AActor* Requester = Reservations[SlotIndex].Get();
 		const ABHEnemy* Enemy = Cast<ABHEnemy>(Requester);
-		const bool bKeepLockedAttackSlot = SlotType == EBHCombatSlotType::Attack
+		return SlotType == EBHCombatSlotType::Attack
 			&& Enemy
 			&& (Enemy->GetCombatState() == EBHEnemyCombatState::Attacking
 				|| Enemy->GetCombatState() == EBHEnemyCombatState::Recovering);
-		if (bKeepLockedAttackSlot)
-		{
-			continue;
-		}
+	};
 
-		if (Requester)
-		{
-			Requesters.Add(Requester);
-		}
-		Reservations[SlotIndex].Reset();
-		AvailableSlotIndices.Add(SlotIndex);
-	}
-
-	// Preserve Attack/Wait roles, then minimize conspicuous cross-ring travel by
-	// repeatedly selecting the closest remaining actor-slot pair.
-	while (!Requesters.IsEmpty() && !AvailableSlotIndices.IsEmpty())
+	// Preserve the occupied slot set and layer roles. Only exchange two owners
+	// when the swap clears a meaningful amount of combined remaining travel.
+	// This fixes visible crossovers without making the whole formation dance for
+	// tiny distance differences on every player movement sample.
+	const float MinimumSaving = FMath::Max(0.0f, ReformMinimumTravelSaving);
+	int32 SwapCount = 0;
+	for (int32 PassIndex = 0; PassIndex < Reservations.Num(); ++PassIndex)
 	{
-		int32 BestRequesterArrayIndex = INDEX_NONE;
-		int32 BestSlotArrayIndex = INDEX_NONE;
-		float BestDistanceSquared = TNumericLimits<float>::Max();
-
-		for (int32 RequesterArrayIndex = 0; RequesterArrayIndex < Requesters.Num(); ++RequesterArrayIndex)
+		int32 BestSlotA = INDEX_NONE;
+		int32 BestSlotB = INDEX_NONE;
+		float BestSaving = MinimumSaving;
+		for (int32 SlotA = 0; SlotA < Reservations.Num(); ++SlotA)
 		{
-			const AActor* Requester = Requesters[RequesterArrayIndex].Get();
-			if (!Requester)
+			AActor* RequesterA = Reservations[SlotA].Get();
+			if (!RequesterA || IsLockedReservation(RequesterA))
 			{
 				continue;
 			}
-
-			for (int32 SlotArrayIndex = 0; SlotArrayIndex < AvailableSlotIndices.Num(); ++SlotArrayIndex)
+			for (int32 SlotB = SlotA + 1; SlotB < Reservations.Num(); ++SlotB)
 			{
-				const FVector& SlotLocation = SlotLocations[AvailableSlotIndices[SlotArrayIndex]];
-				const float DistanceSquared = FVector::DistSquared2D(Requester->GetActorLocation(), SlotLocation);
-				if (DistanceSquared < BestDistanceSquared)
+				AActor* RequesterB = Reservations[SlotB].Get();
+				if (!RequesterB || IsLockedReservation(RequesterB))
 				{
-					BestDistanceSquared = DistanceSquared;
-					BestRequesterArrayIndex = RequesterArrayIndex;
-					BestSlotArrayIndex = SlotArrayIndex;
+					continue;
+				}
+
+				const float CurrentTravel = FVector::Dist2D(
+					RequesterA->GetActorLocation(),
+					SlotLocations[SlotA]) + FVector::Dist2D(
+					RequesterB->GetActorLocation(),
+					SlotLocations[SlotB]);
+				const float SwappedTravel = FVector::Dist2D(
+					RequesterA->GetActorLocation(),
+					SlotLocations[SlotB]) + FVector::Dist2D(
+					RequesterB->GetActorLocation(),
+					SlotLocations[SlotA]);
+				const float TravelSaving = CurrentTravel - SwappedTravel;
+				if (TravelSaving >= MinimumSaving
+					&& (BestSlotA == INDEX_NONE || TravelSaving > BestSaving))
+				{
+					BestSaving = TravelSaving;
+					BestSlotA = SlotA;
+					BestSlotB = SlotB;
 				}
 			}
 		}
 
-		if (BestRequesterArrayIndex == INDEX_NONE || BestSlotArrayIndex == INDEX_NONE)
+		if (BestSlotA == INDEX_NONE || BestSlotB == INDEX_NONE)
 		{
 			break;
 		}
+		Reservations.Swap(BestSlotA, BestSlotB);
+		++SwapCount;
+	}
 
-		const int32 ReservedSlotIndex = AvailableSlotIndices[BestSlotArrayIndex];
-		Reservations[ReservedSlotIndex] = Requesters[BestRequesterArrayIndex];
-		Requesters.RemoveAtSwap(BestRequesterArrayIndex, 1, EAllowShrinking::No);
-		AvailableSlotIndices.RemoveAtSwap(BestSlotArrayIndex, 1, EAllowShrinking::No);
+	if (SwapCount > 0)
+	{
+		UE_LOG(
+			LogProjectBH,
+			VeryVerbose,
+			TEXT("%s reformed %s reservations with %d travel-saving swaps."),
+			GetOwner() ? *GetOwner()->GetName() : TEXT("InvalidSlotOwner"),
+			*StaticEnum<EBHCombatSlotType>()->GetNameStringByValue(static_cast<int64>(SlotType)),
+			SwapCount);
 	}
 }
 
