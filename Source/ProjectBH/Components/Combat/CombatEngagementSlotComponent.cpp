@@ -165,7 +165,25 @@ void UCombatEngagementSlotComponent::AnalyzeCombatSpace(float SampleDeltaTime)
 	FVector ProjectedOrigin;
 	if (!Owner || !NavigationSystem || !ProjectToNavigation(Owner->GetActorLocation(), ProjectedOrigin))
 	{
+		if (bHasValidSpaceAnalysis && SpaceAnalysisInvalidGraceRemaining > 0.0f)
+		{
+			// A missing projection sample is not enough evidence to dismantle a
+			// committed formation. Keep the last valid geometry for a short grace
+			// window while exposing that the current mouth probes are no longer raw.
+			SpaceAnalysisInvalidGraceRemaining = FMath::Max(
+				0.0f,
+				SpaceAnalysisInvalidGraceRemaining - FMath::Max(0.0f, SampleDeltaTime));
+			CandidateSpaceMode = CurrentSpaceMode;
+			SpaceModeTransitionElapsed = 0.0f;
+			bRawCorridorMouthDetected = false;
+			bRawCorridorForwardMouthDetected = false;
+			bRawCorridorRearMouthDetected = false;
+			PendingMouthMixedKind = EMouthMixedKind::None;
+			MouthMixedEvidenceElapsed = 0.0f;
+			return;
+		}
 		bHasValidSpaceAnalysis = false;
+		SpaceAnalysisInvalidGraceRemaining = 0.0f;
 		CandidateSpaceMode = CurrentSpaceMode;
 		SpaceModeTransitionElapsed = 0.0f;
 		SpaceProbeEndpoints.Reset();
@@ -174,7 +192,19 @@ void UCombatEngagementSlotComponent::AnalyzeCombatSpace(float SampleDeltaTime)
 		CorridorWidthProbeIndex = INDEX_NONE;
 		EstimatedCorridorEdgeNearDistance = 0.0f;
 		EstimatedCorridorEdgeClearanceDifference = 0.0f;
+		bRawCorridorMouthDetected = false;
 		bCorridorMouthDetected = false;
+		CorridorMouthEvidenceHoldRemaining = 0.0f;
+		bRawCorridorForwardMouthDetected = false;
+		bRawCorridorRearMouthDetected = false;
+		bCorridorForwardMouthDetected = false;
+		bCorridorRearMouthDetected = false;
+		CorridorForwardMouthEvidenceHoldRemaining = 0.0f;
+		CorridorRearMouthEvidenceHoldRemaining = 0.0f;
+		bMouthMixedActive = false;
+		MouthMixedEvidenceElapsed = 0.0f;
+		PendingMouthMixedKind = EMouthMixedKind::None;
+		ActiveMouthMixedKind = EMouthMixedKind::None;
 		bCorridorForwardCrossSectionValid = false;
 		bCorridorRearCrossSectionValid = false;
 		EstimatedCorridorForwardWidth = 0.0f;
@@ -295,21 +325,69 @@ void UCombatEngagementSlotComponent::AnalyzeCombatSpace(float SampleDeltaTime)
 		CorridorRearCrossSectionCenter,
 		CorridorRearCrossSectionSide0,
 		CorridorRearCrossSectionSide1);
-	const float WidestSampledCrossSection = FMath::Max(
-		bCorridorForwardCrossSectionValid ? EstimatedCorridorForwardWidth : 0.0f,
-		bCorridorRearCrossSectionValid ? EstimatedCorridorRearWidth : 0.0f);
 	const float NarrowWidthReference = FMath::Min(
 		EstimatedCorridorWidth,
 		FMath::Max(1.0f, CorridorExitMinWidth));
 	const float RequiredMouthWidth = FMath::Max(
 		FMath::Max(CorridorExitMinWidth, CorridorMouthMinimumOpenWidth),
 		NarrowWidthReference * FMath::Max(1.0f, CorridorMouthExpansionRatio));
-	const bool bHasNarrowMouthContext = CurrentSpaceMode == EBHCombatSpaceMode::Corridor
-		|| EstimatedCorridorWidth < FMath::Max(0.0f, CorridorExitMinWidth);
-	bCorridorMouthDetected = bHasNarrowMouthContext
-		&& (bCorridorForwardCrossSectionValid
-		|| bCorridorRearCrossSectionValid)
-		&& WidestSampledCrossSection >= RequiredMouthWidth;
+	const bool bForwardWide = bCorridorForwardCrossSectionValid
+		&& EstimatedCorridorForwardWidth >= RequiredMouthWidth;
+	const bool bRearWide = bCorridorRearCrossSectionValid
+		&& EstimatedCorridorRearWidth >= RequiredMouthWidth;
+	const bool bHasNarrowSample = EstimatedCorridorWidth
+		< FMath::Max(0.0f, CorridorExitMinWidth)
+		|| (bCorridorForwardCrossSectionValid && !bForwardWide)
+		|| (bCorridorRearCrossSectionValid && !bRearWide);
+	bRawCorridorForwardMouthDetected = bHasNarrowSample && bForwardWide;
+	bRawCorridorRearMouthDetected = bHasNarrowSample && bRearWide;
+	bRawCorridorMouthDetected = bRawCorridorForwardMouthDetected
+		|| bRawCorridorRearMouthDetected;
+	if (CurrentSpaceMode == EBHCombatSpaceMode::Corridor)
+	{
+		auto UpdateDirectionalMouthEvidence = [this, SampleDeltaTime](
+			bool bRawDetected,
+			float& HoldRemaining,
+			bool& bHeldDetected)
+		{
+			if (bRawDetected)
+			{
+				HoldRemaining = FMath::Max(
+					FMath::Max(0.0f, CorridorMouthEvidenceHoldDuration),
+					FMath::Max(0.0f, MouthMixedEnterDuration));
+			}
+			else
+			{
+				HoldRemaining = FMath::Max(
+					0.0f,
+					HoldRemaining - FMath::Max(0.0f, SampleDeltaTime));
+			}
+			bHeldDetected = bRawDetected || HoldRemaining > 0.0f;
+		};
+		UpdateDirectionalMouthEvidence(
+			bRawCorridorForwardMouthDetected,
+			CorridorForwardMouthEvidenceHoldRemaining,
+			bCorridorForwardMouthDetected);
+		UpdateDirectionalMouthEvidence(
+			bRawCorridorRearMouthDetected,
+			CorridorRearMouthEvidenceHoldRemaining,
+			bCorridorRearMouthDetected);
+		CorridorMouthEvidenceHoldRemaining = FMath::Max(
+			CorridorForwardMouthEvidenceHoldRemaining,
+			CorridorRearMouthEvidenceHoldRemaining);
+		bCorridorMouthDetected = bCorridorForwardMouthDetected
+			|| bCorridorRearMouthDetected;
+	}
+	else
+	{
+		CorridorForwardMouthEvidenceHoldRemaining = 0.0f;
+		CorridorRearMouthEvidenceHoldRemaining = 0.0f;
+		CorridorMouthEvidenceHoldRemaining = 0.0f;
+		bCorridorForwardMouthDetected = bRawCorridorForwardMouthDetected;
+		bCorridorRearMouthDetected = bRawCorridorRearMouthDetected;
+		bCorridorMouthDetected = bRawCorridorMouthDetected;
+	}
+	UpdateMouthMixedState(SampleDeltaTime);
 
 	int32 NearbyBlockedProbeCount = 0;
 	const float NearbyWallDistance = FMath::Max(0.0f, PocketNearbyWallDistance);
@@ -360,6 +438,7 @@ void UCombatEngagementSlotComponent::AnalyzeCombatSpace(float SampleDeltaTime)
 			0.0f);
 	}
 	bHasValidSpaceAnalysis = true;
+	SpaceAnalysisInvalidGraceRemaining = FMath::Max(0.0f, SpaceAnalysisInvalidGraceDuration);
 
 	const float EnterWidth = FMath::Max(0.0f, CorridorEnterMaxWidth);
 	const float ExitWidth = FMath::Max(EnterWidth, CorridorExitMinWidth);
@@ -409,15 +488,16 @@ void UCombatEngagementSlotComponent::AnalyzeCombatSpace(float SampleDeltaTime)
 		&& bCorridorExitShapeEvidence
 		&& !bCorridorEdgePocketEvidence;
 
-	if (bCorridorEdgePocketEvidence)
+	if (CurrentSpaceMode == EBHCombatSpaceMode::Corridor
+		&& bCorridorMouthDetected)
+	{
+		// MouthMixed is a Corridor layout sub-state. Do not collapse the entire
+		// formation into the open/pocket side while the target straddles a mouth.
+		CandidateSpaceMode = EBHCombatSpaceMode::Corridor;
+	}
+	else if (bCorridorEdgePocketEvidence)
 	{
 		CandidateSpaceMode = EBHCombatSpaceMode::Pocket;
-	}
-	else if (bCorridorMouthDetected)
-	{
-		CandidateSpaceMode = bPocketEvidence
-			? EBHCombatSpaceMode::Pocket
-			: EBHCombatSpaceMode::Open;
 	}
 	else if (bCorridorEvidence || bCenteredCorridorRecovery)
 	{
@@ -463,7 +543,7 @@ void UCombatEngagementSlotComponent::AnalyzeCombatSpace(float SampleDeltaTime)
 		&& CandidateSpaceMode != EBHCombatSpaceMode::Corridor
 		&& bCorridorMouthDetected)
 	{
-		RequiredDuration = FMath::Max(0.0f, CorridorMouthExitDuration);
+		RequiredDuration = FMath::Max(0.0f, MouthMixedEnterDuration);
 	}
 	if (SpaceModeTransitionElapsed >= RequiredDuration)
 	{
@@ -513,6 +593,126 @@ int32 UCombatEngagementSlotComponent::GetCorridorSideForRequester(AActor* Reques
 	return IsCorridorFormationActive() ? GetCorridorSideIndex(Requester) : INDEX_NONE;
 }
 
+void UCombatEngagementSlotComponent::UpdateMouthMixedState(float SampleDeltaTime)
+{
+	if (CurrentSpaceMode != EBHCombatSpaceMode::Corridor)
+	{
+		MouthMixedEvidenceElapsed = 0.0f;
+		PendingMouthMixedKind = EMouthMixedKind::None;
+		if (bMouthMixedActive)
+		{
+			SetMouthMixedState(false);
+		}
+		return;
+	}
+
+	const auto ResolveKind = [](bool bForwardDetected, bool bRearDetected)
+	{
+		if (bForwardDetected && bRearDetected)
+		{
+			return EMouthMixedKind::DoubleMouth;
+		}
+		if (bForwardDetected)
+		{
+			// MouthSampleAxis follows CorridorFormationRearDirection, which is Side 0.
+			return EMouthMixedKind::Side0Open;
+		}
+		return bRearDetected
+			? EMouthMixedKind::Side1Open
+			: EMouthMixedKind::None;
+	};
+	const EMouthMixedKind RawObservedKind = ResolveKind(
+		bRawCorridorForwardMouthDetected,
+		bRawCorridorRearMouthDetected);
+	const EMouthMixedKind HeldObservedKind = ResolveKind(
+		bCorridorForwardMouthDetected,
+		bCorridorRearMouthDetected);
+
+	if (bMouthMixedActive)
+	{
+		if (HeldObservedKind == EMouthMixedKind::None)
+		{
+			SetMouthMixedState(false);
+			return;
+		}
+		if (RawObservedKind == EMouthMixedKind::None
+			|| RawObservedKind == ActiveMouthMixedKind)
+		{
+			PendingMouthMixedKind = EMouthMixedKind::None;
+			MouthMixedEvidenceElapsed = 0.0f;
+			return;
+		}
+
+		if (PendingMouthMixedKind != RawObservedKind)
+		{
+			PendingMouthMixedKind = RawObservedKind;
+			MouthMixedEvidenceElapsed = FMath::Max(0.0f, SampleDeltaTime);
+			if (MouthMixedEvidenceElapsed >= FMath::Max(0.0f, MouthMixedKindChangeDuration))
+			{
+				SetMouthMixedState(true, RawObservedKind);
+			}
+			return;
+		}
+		MouthMixedEvidenceElapsed += FMath::Max(0.0f, SampleDeltaTime);
+		if (MouthMixedEvidenceElapsed >= FMath::Max(0.0f, MouthMixedKindChangeDuration))
+		{
+			SetMouthMixedState(true, RawObservedKind);
+		}
+		return;
+	}
+
+	// Held evidence is only exit grace. It must never qualify a new MouthMixed
+	// state after the raw detector has already gone away.
+	if (RawObservedKind == EMouthMixedKind::None)
+	{
+		MouthMixedEvidenceElapsed = 0.0f;
+		PendingMouthMixedKind = EMouthMixedKind::None;
+		return;
+	}
+	if (PendingMouthMixedKind != RawObservedKind)
+	{
+		PendingMouthMixedKind = RawObservedKind;
+		MouthMixedEvidenceElapsed = FMath::Max(0.0f, SampleDeltaTime);
+		if (MouthMixedEvidenceElapsed >= FMath::Max(0.0f, MouthMixedEnterDuration))
+		{
+			SetMouthMixedState(true, RawObservedKind);
+		}
+		return;
+	}
+
+	MouthMixedEvidenceElapsed += FMath::Max(0.0f, SampleDeltaTime);
+	if (MouthMixedEvidenceElapsed >= FMath::Max(0.0f, MouthMixedEnterDuration))
+	{
+		SetMouthMixedState(true, RawObservedKind);
+	}
+}
+
+void UCombatEngagementSlotComponent::SetMouthMixedState(
+	bool bNewActive,
+	EMouthMixedKind NewKind)
+{
+	if (!bNewActive)
+	{
+		NewKind = EMouthMixedKind::None;
+	}
+	if (bMouthMixedActive == bNewActive && ActiveMouthMixedKind == NewKind)
+	{
+		return;
+	}
+
+	bMouthMixedActive = bNewActive;
+	ActiveMouthMixedKind = NewKind;
+	PendingMouthMixedKind = EMouthMixedKind::None;
+	MouthMixedEvidenceElapsed = 0.0f;
+	PendingCorridorAttackLayout.Reset();
+	PendingCorridorCapacityElapsed = 0.0f;
+	PendingCorridorWaitRowLayout.Reset();
+	PendingCorridorHoldingRowLayout.Reset();
+	PendingCorridorRowLayoutElapsed = 0.0f;
+	++FormationRevision;
+	NotifyAllReservedRequestersSlotChanged();
+}
+
 void UCombatEngagementSlotComponent::HandleCombatSpaceModeChanged(EBHCombatSpaceMode PreviousMode)
 {
 	if (PreviousMode == CurrentSpaceMode)
@@ -520,6 +720,13 @@ void UCombatEngagementSlotComponent::HandleCombatSpaceModeChanged(EBHCombatSpace
 		return;
 	}
 	const AActor* Owner = GetOwner();
+	if (CurrentSpaceMode != EBHCombatSpaceMode::Corridor)
+	{
+		bMouthMixedActive = false;
+		ActiveMouthMixedKind = EMouthMixedKind::None;
+		PendingMouthMixedKind = EMouthMixedKind::None;
+		MouthMixedEvidenceElapsed = 0.0f;
+	}
 
 	if (CurrentSpaceMode == EBHCombatSpaceMode::Corridor)
 	{
@@ -814,7 +1021,6 @@ void UCombatEngagementSlotComponent::RefreshCorridorRowLayout(float DeltaTime)
 		PendingCorridorRowLayoutElapsed = 0.0f;
 		return;
 	}
-
 	TArray<FCorridorRowSlot> CandidateWaitLayout;
 	TArray<FCorridorRowSlot> CandidateHoldingLayout;
 	float CandidatePendingStartDistance = 0.0f;
@@ -954,41 +1160,100 @@ bool UCombatEngagementSlotComponent::BuildCorridorLayerLayout(
 	}
 
 	const float RowSpacing = FMath::Max(1.0f, CorridorRowSpacing);
-	const int32 MaximumRowsToInspect = FMath::Max(64, RequiredSlotCount * 2);
+	const int32 ExtraBalanceRows = FMath::Max(0, CorridorSideBalanceSearchExtraRows);
+	const int32 MaximumRowsToInspect = FMath::Max(
+		8,
+		RequiredSlotCount * 2 + ExtraBalanceRows);
+	const int32 PreferredSideCounts[2] =
+	{
+		(RequiredSlotCount + 1) / 2,
+		RequiredSlotCount / 2
+	};
+	TArray<FCorridorRowSlot> SideCandidates[2];
+	int32 FirstTotalCapacityRow = INDEX_NONE;
 	for (int32 RowIndex = 0;
-		RowIndex < MaximumRowsToInspect && OutLayout.Num() < RequiredSlotCount;
+		RowIndex < MaximumRowsToInspect;
 		++RowIndex)
 	{
 		const float RowDistance = StartDistance
 			+ static_cast<float>(RowIndex) * RowSpacing;
-		TArray<FCorridorRowSlot> SideRows[2];
-		BuildCorridorRowSlots(0, RowIndex, RowDistance, SideRows[0]);
-		BuildCorridorRowSlots(1, RowIndex, RowDistance, SideRows[1]);
-		const int32 MaximumLaneRank = FMath::Max(SideRows[0].Num(), SideRows[1].Num());
-		const int32 FirstSideIndex = RowIndex % 2;
-		const int32 PreviousSlotCount = OutLayout.Num();
-		for (int32 LaneRank = 0;
-			LaneRank < MaximumLaneRank && OutLayout.Num() < RequiredSlotCount;
-			++LaneRank)
+		for (int32 SideIndex = 0; SideIndex < 2; ++SideIndex)
 		{
-			for (int32 SidePass = 0;
-				SidePass < 2 && OutLayout.Num() < RequiredSlotCount;
-				++SidePass)
-			{
-				const int32 SideIndex = (FirstSideIndex + SidePass) % 2;
-				if (SideRows[SideIndex].IsValidIndex(LaneRank))
-				{
-					OutLayout.Add(SideRows[SideIndex][LaneRank]);
-				}
-			}
+			TArray<FCorridorRowSlot> RowCandidates;
+			BuildCorridorRowSlots(SideIndex, RowIndex, RowDistance, RowCandidates);
+			SideCandidates[SideIndex].Append(MoveTemp(RowCandidates));
 		}
-		if (OutLayout.Num() > PreviousSlotCount)
+
+		if (SideCandidates[0].Num() >= PreferredSideCounts[0]
+			&& SideCandidates[1].Num() >= PreferredSideCounts[1])
 		{
-			OutLastRowDistance = RowDistance;
+			break;
+		}
+
+		if (FirstTotalCapacityRow == INDEX_NONE
+			&& SideCandidates[0].Num() + SideCandidates[1].Num()
+				>= RequiredSlotCount)
+		{
+			FirstTotalCapacityRow = RowIndex;
+		}
+		if (FirstTotalCapacityRow != INDEX_NONE
+			&& RowIndex - FirstTotalCapacityRow >= ExtraBalanceRows)
+		{
+			break;
 		}
 	}
 
-	return OutLayout.Num() >= RequiredSlotCount;
+	if (SideCandidates[0].Num() + SideCandidates[1].Num() < RequiredSlotCount)
+	{
+		return false;
+	}
+
+	int32 SideQuotas[2] =
+	{
+		FMath::Min(PreferredSideCounts[0], SideCandidates[0].Num()),
+		FMath::Min(PreferredSideCounts[1], SideCandidates[1].Num())
+	};
+	int32 RemainingQuota = RequiredSlotCount - SideQuotas[0] - SideQuotas[1];
+	while (RemainingQuota > 0)
+	{
+		const int32 Side0Remaining = SideCandidates[0].Num() - SideQuotas[0];
+		const int32 Side1Remaining = SideCandidates[1].Num() - SideQuotas[1];
+		const int32 SpillSideIndex = Side0Remaining >= Side1Remaining ? 0 : 1;
+		if ((SpillSideIndex == 0 ? Side0Remaining : Side1Remaining) <= 0)
+		{
+			return false;
+		}
+		++SideQuotas[SpillSideIndex];
+		--RemainingQuota;
+	}
+
+	int32 SideCursors[2] = { 0, 0 };
+	const int32 FirstSideIndex = static_cast<int32>(SlotType) % 2;
+	while (OutLayout.Num() < RequiredSlotCount)
+	{
+		bool bAddedSlot = false;
+		for (int32 SidePass = 0; SidePass < 2; ++SidePass)
+		{
+			const int32 SideIndex = (FirstSideIndex + SidePass) % 2;
+			if (SideCursors[SideIndex] >= SideQuotas[SideIndex])
+			{
+				continue;
+			}
+			const FCorridorRowSlot& SelectedSlot =
+				SideCandidates[SideIndex][SideCursors[SideIndex]++];
+			OutLayout.Add(SelectedSlot);
+			OutLastRowDistance = FMath::Max(
+				OutLastRowDistance,
+				StartDistance + static_cast<float>(SelectedSlot.RowIndex) * RowSpacing);
+			bAddedSlot = true;
+		}
+		if (!bAddedSlot)
+		{
+			return false;
+		}
+	}
+
+	return true;
 }
 
 bool UCombatEngagementSlotComponent::BuildCorridorRowSlots(
@@ -998,6 +1263,15 @@ bool UCombatEngagementSlotComponent::BuildCorridorRowSlots(
 	TArray<FCorridorRowSlot>& OutRowSlots) const
 {
 	OutRowSlots.Reset();
+	if (IsMouthMixedFanSide(SideIndex))
+	{
+		return BuildMouthMixedFanRowSlots(
+			SideIndex,
+			RowIndex,
+			LongitudinalDistance,
+			OutRowSlots);
+	}
+
 	const AActor* Owner = GetOwner();
 	const FVector AxisDirection = CorridorFormationRearDirection.GetSafeNormal2D();
 	if (!Owner || !IsCorridorFormationActive()
@@ -1011,7 +1285,9 @@ bool UCombatEngagementSlotComponent::BuildCorridorRowSlots(
 	const float AnchorLag = FMath::Max(0.0f, FVector::DotProduct(
 		EngagementAnchorLocation - Owner->GetActorLocation(),
 		SideDirection));
-	const FVector OuterCenter = Owner->GetActorLocation() + SideDirection * AnchorLag;
+	const FVector OuterCenter = bMouthMixedActive
+		? EngagementAnchorLocation
+		: Owner->GetActorLocation() + SideDirection * AnchorLag;
 	const FVector DesiredRowCenter = OuterCenter
 		+ SideDirection * FMath::Max(0.0f, LongitudinalDistance);
 	float MeasuredWidth = 0.0f;
@@ -1089,6 +1365,149 @@ bool UCombatEngagementSlotComponent::BuildCorridorRowSlots(
 		return Left.LaneIndex < Right.LaneIndex;
 	});
 	return !OutRowSlots.IsEmpty();
+}
+
+bool UCombatEngagementSlotComponent::BuildMouthMixedFanRowSlots(
+	int32 SideIndex,
+	int32 RowIndex,
+	float LongitudinalDistance,
+	TArray<FCorridorRowSlot>& OutRowSlots) const
+{
+	OutRowSlots.Reset();
+	const FVector AxisDirection = CorridorFormationRearDirection.GetSafeNormal2D();
+	if (!GetOwner()
+		|| !IsMouthMixedFanSide(SideIndex)
+		|| AxisDirection.IsNearlyZero())
+	{
+		return false;
+	}
+
+	UWorld* World = GetWorld();
+	UNavigationSystemV1* NavigationSystem = World
+		? FNavigationSystem::GetCurrent<UNavigationSystemV1>(World)
+		: nullptr;
+	FVector ProjectedCenter;
+	if (!NavigationSystem
+		|| !ProjectToNavigation(EngagementAnchorLocation, ProjectedCenter))
+	{
+		return false;
+	}
+
+	const FVector OpenDirection = SideIndex == 0 ? AxisDirection : -AxisDirection;
+	const float Radius = FMath::Max(1.0f, LongitudinalDistance);
+	const float HalfAngle = FMath::Clamp(PocketMaximumArcHalfAngle, 10.0f, 89.0f);
+	const float Spacing = FMath::Min(
+		FMath::Max(1.0f, CorridorSlotSpacing),
+		2.0f * Radius);
+	const float StepAngle = FMath::RadiansToDegrees(2.0f * FMath::Asin(FMath::Clamp(
+		Spacing / (2.0f * Radius),
+		0.0f,
+		1.0f)));
+	const int32 DesiredLaneCount = FMath::Clamp(
+		1 + FMath::FloorToInt((2.0f * HalfAngle) / FMath::Max(1.0f, StepAngle)),
+		1,
+		FMath::Max(1, CorridorRowMaximumLaneCount));
+	const float FittedStepAngle = DesiredLaneCount > 1
+		? FMath::Min(
+			StepAngle,
+			(2.0f * HalfAngle) / static_cast<float>(DesiredLaneCount - 1))
+		: 0.0f;
+	const float ProjectionToleranceSquared = FMath::Square(
+		FMath::Max(0.0f, CorridorRowProjectionTolerance));
+	const float MinimumSpacingSquared = FMath::Square(
+		FMath::Max(1.0f, CorridorSlotSpacing) * 0.75f);
+	for (int32 LaneIndex = 0; LaneIndex < DesiredLaneCount; ++LaneIndex)
+	{
+		const float CenteredLane = static_cast<float>(LaneIndex)
+			- 0.5f * static_cast<float>(DesiredLaneCount - 1);
+		const float DesiredAngle = FMath::Clamp(
+			CenteredLane * FittedStepAngle,
+			-HalfAngle,
+			HalfAngle);
+		for (int32 AttemptIndex = 0; AttemptIndex < 5; ++AttemptIndex)
+		{
+			const float AngleScale = 1.0f - static_cast<float>(AttemptIndex) / 5.0f;
+			const FVector SlotDirection = OpenDirection.RotateAngleAxis(
+				DesiredAngle * AngleScale,
+				FVector::UpVector).GetSafeNormal2D();
+			const FVector DesiredLocation = EngagementAnchorLocation
+				+ SlotDirection * Radius;
+			FVector ProjectedLocation;
+			FVector RaycastHitLocation;
+			if (!ProjectToNavigation(DesiredLocation, ProjectedLocation)
+				|| FVector::DistSquared2D(DesiredLocation, ProjectedLocation)
+					> ProjectionToleranceSquared
+				|| NavigationSystem->NavigationRaycast(
+					World,
+					ProjectedCenter,
+					ProjectedLocation,
+					RaycastHitLocation))
+			{
+				continue;
+			}
+
+			bool bOverlapsExistingLane = false;
+			for (const FCorridorRowSlot& ExistingSlot : OutRowSlots)
+			{
+				if (FVector::DistSquared2D(
+					ExistingSlot.WorldLocation,
+					ProjectedLocation) < MinimumSpacingSquared)
+				{
+					bOverlapsExistingLane = true;
+					break;
+				}
+			}
+			if (bOverlapsExistingLane)
+			{
+				continue;
+			}
+
+			FCorridorRowSlot& RowSlot = OutRowSlots.AddDefaulted_GetRef();
+			RowSlot.WorldLocation = ProjectedLocation;
+			RowSlot.SideIndex = SideIndex;
+			RowSlot.RowIndex = RowIndex;
+			RowSlot.LaneIndex = LaneIndex;
+			break;
+		}
+	}
+
+	const int32 ValidLaneCount = OutRowSlots.Num();
+	for (FCorridorRowSlot& RowSlot : OutRowSlots)
+	{
+		RowSlot.LaneCount = ValidLaneCount;
+	}
+	OutRowSlots.Sort([DesiredLaneCount](const FCorridorRowSlot& Left, const FCorridorRowSlot& Right)
+	{
+		const float CenterLane = 0.5f * static_cast<float>(DesiredLaneCount - 1);
+		const float LeftCenterDistance = FMath::Abs(static_cast<float>(Left.LaneIndex) - CenterLane);
+		const float RightCenterDistance = FMath::Abs(static_cast<float>(Right.LaneIndex) - CenterLane);
+		if (!FMath::IsNearlyEqual(LeftCenterDistance, RightCenterDistance))
+		{
+			return LeftCenterDistance < RightCenterDistance;
+		}
+		return Left.LaneIndex < Right.LaneIndex;
+	});
+	return !OutRowSlots.IsEmpty();
+}
+
+bool UCombatEngagementSlotComponent::IsMouthMixedFanSide(int32 SideIndex) const
+{
+	if (!bMouthMixedActive || !FMath::IsWithin(SideIndex, 0, 2))
+	{
+		return false;
+	}
+
+	switch (ActiveMouthMixedKind)
+	{
+	case EMouthMixedKind::Side0Open:
+		return SideIndex == 0;
+	case EMouthMixedKind::Side1Open:
+		return SideIndex == 1;
+	case EMouthMixedKind::DoubleMouth:
+		return true;
+	default:
+		return false;
+	}
 }
 
 bool UCombatEngagementSlotComponent::AreCorridorRowLayoutsEquivalent(
@@ -1961,16 +2380,28 @@ bool UCombatEngagementSlotComponent::BuildCorridorAttackCandidateLayout(
 			ExistingOverlap += IsActiveSample(Candidate.SampleIndex) ? 1 : 0;
 		}
 		const int32 SideImbalance = FMath::Abs(SideCounts[0] - SideCounts[1]);
-		const bool bBetter = CurrentSelection.Num() > BestSelection.Num()
-			|| (CurrentSelection.Num() == BestSelection.Num()
-				&& AxisAlignment > BestAxisAlignment + UE_KINDA_SMALL_NUMBER)
-			|| (CurrentSelection.Num() == BestSelection.Num()
-				&& FMath::IsNearlyEqual(AxisAlignment, BestAxisAlignment)
-				&& SideImbalance < BestSideImbalance)
-			|| (CurrentSelection.Num() == BestSelection.Num()
-				&& FMath::IsNearlyEqual(AxisAlignment, BestAxisAlignment)
-				&& SideImbalance == BestSideImbalance
-				&& ExistingOverlap > BestExistingOverlap);
+		bool bBetter = CurrentSelection.Num() > BestSelection.Num();
+		if (CurrentSelection.Num() == BestSelection.Num())
+		{
+			if (bMouthMixedActive)
+			{
+				bBetter = SideImbalance < BestSideImbalance
+					|| (SideImbalance == BestSideImbalance
+						&& AxisAlignment > BestAxisAlignment + UE_KINDA_SMALL_NUMBER)
+					|| (SideImbalance == BestSideImbalance
+						&& FMath::IsNearlyEqual(AxisAlignment, BestAxisAlignment)
+						&& ExistingOverlap > BestExistingOverlap);
+			}
+			else
+			{
+				bBetter = AxisAlignment > BestAxisAlignment + UE_KINDA_SMALL_NUMBER
+					|| (FMath::IsNearlyEqual(AxisAlignment, BestAxisAlignment)
+						&& SideImbalance < BestSideImbalance)
+					|| (FMath::IsNearlyEqual(AxisAlignment, BestAxisAlignment)
+						&& SideImbalance == BestSideImbalance
+						&& ExistingOverlap > BestExistingOverlap);
+			}
+		}
 		if (bBetter)
 		{
 			BestSelection = CurrentSelection;
@@ -4772,16 +5203,25 @@ void UCombatEngagementSlotComponent::DrawCombatSpaceAnalysisDebug() const
 			0,
 			4.0f);
 	}
-	const FColor MouthCrossSectionColor = bCorridorMouthDetected
-		? FColor::Red
-		: FColor(80, 200, 255);
+	const auto ResolveMouthColor = [](bool bRawDetected, bool bHeldDetected)
+	{
+		return bRawDetected
+			? FColor::Red
+			: (bHeldDetected ? FColor::Orange : FColor(80, 200, 255));
+	};
+	const FColor ForwardMouthColor = ResolveMouthColor(
+		bRawCorridorForwardMouthDetected,
+		bCorridorForwardMouthDetected);
+	const FColor RearMouthColor = ResolveMouthColor(
+		bRawCorridorRearMouthDetected,
+		bCorridorRearMouthDetected);
 	if (bCorridorForwardCrossSectionValid)
 	{
 		DrawDebugLine(
 			World,
 			CorridorForwardCrossSectionSide0 + FVector(0.0f, 0.0f, 18.0f),
 			CorridorForwardCrossSectionSide1 + FVector(0.0f, 0.0f, 18.0f),
-			MouthCrossSectionColor,
+			ForwardMouthColor,
 			false,
 			0.12f,
 			0,
@@ -4791,7 +5231,7 @@ void UCombatEngagementSlotComponent::DrawCombatSpaceAnalysisDebug() const
 			CorridorForwardCrossSectionCenter + FVector(0.0f, 0.0f, 18.0f),
 			8.0f,
 			8,
-			MouthCrossSectionColor,
+			ForwardMouthColor,
 			false,
 			0.12f,
 			0,
@@ -4803,7 +5243,7 @@ void UCombatEngagementSlotComponent::DrawCombatSpaceAnalysisDebug() const
 			World,
 			CorridorRearCrossSectionSide0 + FVector(0.0f, 0.0f, 18.0f),
 			CorridorRearCrossSectionSide1 + FVector(0.0f, 0.0f, 18.0f),
-			MouthCrossSectionColor,
+			RearMouthColor,
 			false,
 			0.12f,
 			0,
@@ -4813,7 +5253,7 @@ void UCombatEngagementSlotComponent::DrawCombatSpaceAnalysisDebug() const
 			CorridorRearCrossSectionCenter + FVector(0.0f, 0.0f, 18.0f),
 			8.0f,
 			8,
-			MouthCrossSectionColor,
+			RearMouthColor,
 			false,
 			0.12f,
 			0,
@@ -4821,12 +5261,14 @@ void UCombatEngagementSlotComponent::DrawCombatSpaceAnalysisDebug() const
 	}
 	if (IsCorridorFormationActive())
 	{
+		const FColor Side0Color = IsMouthMixedFanSide(0) ? FColor::Orange : FColor::Purple;
+		const FColor Side1Color = IsMouthMixedFanSide(1) ? FColor::Orange : FColor::Purple;
 		DrawDebugDirectionalArrow(
 			World,
 			DrawOrigin,
 			DrawOrigin + CorridorFormationRearDirection * 180.0f,
 			30.0f,
-			FColor::Purple,
+			Side0Color,
 			false,
 			0.12f,
 			0,
@@ -4836,7 +5278,7 @@ void UCombatEngagementSlotComponent::DrawCombatSpaceAnalysisDebug() const
 			DrawOrigin,
 			DrawOrigin - CorridorFormationRearDirection * 180.0f,
 			30.0f,
-			FColor::Purple,
+			Side1Color,
 			false,
 			0.12f,
 			0,
@@ -4871,17 +5313,27 @@ void UCombatEngagementSlotComponent::DrawCombatSpaceAnalysisDebug() const
 	const TCHAR* CurrentModeText = ResolveModeText(CurrentSpaceMode);
 	const TCHAR* CandidateModeText = ResolveModeText(CandidateSpaceMode);
 	int32 MaximumDynamicRowLaneCount = 0;
+	int32 WaitRowSideCounts[2] = { 0, 0 };
+	int32 HoldingRowSideCounts[2] = { 0, 0 };
 	for (const FCorridorRowSlot& RowSlot : CorridorWaitRowLayout)
 	{
 		MaximumDynamicRowLaneCount = FMath::Max(
 			MaximumDynamicRowLaneCount,
 			RowSlot.LaneCount);
+		if (FMath::IsWithin(RowSlot.SideIndex, 0, 2))
+		{
+			++WaitRowSideCounts[RowSlot.SideIndex];
+		}
 	}
 	for (const FCorridorRowSlot& RowSlot : CorridorHoldingRowLayout)
 	{
 		MaximumDynamicRowLaneCount = FMath::Max(
 			MaximumDynamicRowLaneCount,
 			RowSlot.LaneCount);
+		if (FMath::IsWithin(RowSlot.SideIndex, 0, 2))
+		{
+			++HoldingRowSideCounts[RowSlot.SideIndex];
+		}
 	}
 	int32 ValidAttackCandidateCount = 0;
 	int32 SelectedAttackCandidateCount = 0;
@@ -4892,15 +5344,48 @@ void UCombatEngagementSlotComponent::DrawCombatSpaceAnalysisDebug() const
 		SelectedAttackCandidateCount += CorridorAttackProbeSelected.IsValidIndex(ProbeIndex)
 			&& CorridorAttackProbeSelected[ProbeIndex] != 0 ? 1 : 0;
 	}
+	const auto ResolveMouthStateText = [](bool bRawDetected, bool bHeldDetected)
+	{
+		return bRawDetected
+			? TEXT("Raw")
+			: (bHeldDetected ? TEXT("Held") : TEXT("No"));
+	};
+	const TCHAR* ForwardMouthStateText = ResolveMouthStateText(
+		bRawCorridorForwardMouthDetected,
+		bCorridorForwardMouthDetected);
+	const TCHAR* RearMouthStateText = ResolveMouthStateText(
+		bRawCorridorRearMouthDetected,
+		bCorridorRearMouthDetected);
+	const auto ResolveMouthKindText = [](EMouthMixedKind Kind)
+	{
+		switch (Kind)
+		{
+		case EMouthMixedKind::Side0Open:
+			return TEXT("Side0Open");
+		case EMouthMixedKind::Side1Open:
+			return TEXT("Side1Open");
+		case EMouthMixedKind::DoubleMouth:
+			return TEXT("Double");
+		default:
+			return TEXT("No");
+		}
+	};
+	const TCHAR* MouthMixedKindText = ResolveMouthKindText(
+		bMouthMixedActive ? ActiveMouthMixedKind : EMouthMixedKind::None);
+	const TCHAR* PendingMouthMixedKindText = ResolveMouthKindText(PendingMouthMixedKind);
 	const FString SpaceDebugText = FString::Printf(
-		TEXT("Space %s | Candidate:%s %.1fs | Width:%.0f Mouth:%s F%.0f/R%.0f | Edge:%.0f/+%.0f Axis:%.0f Ratio:%.2f | PocketArc:%.0f Wall:%.2f | Sides:%d AttackLanes:%d RowLanes:%d AttackCand:%d/%d Selected:%d ActiveA:%d (%d/%d)"),
+		TEXT("Space %s | Candidate:%s %.1fs | Width:%.0f Mouth F:%s %.0f R:%s %.0f Mixed:%s Next:%s %.1fs | Edge:%.0f/+%.0f Axis:%.0f Ratio:%.2f | PocketArc:%.0f Wall:%.2f | Sides:%d AttackLanes:%d RowLanes:%d RowSides W:%d/%d H:%d/%d AttackCand:%d/%d Selected:%d ActiveA:%d (%d/%d)"),
 		CurrentModeText,
 		CandidateModeText,
 		SpaceModeTransitionElapsed,
 		EstimatedCorridorWidth,
-		bCorridorMouthDetected ? TEXT("Yes") : TEXT("No"),
+		ForwardMouthStateText,
 		EstimatedCorridorForwardWidth,
+		RearMouthStateText,
 		EstimatedCorridorRearWidth,
+		MouthMixedKindText,
+		PendingMouthMixedKindText,
+		MouthMixedEvidenceElapsed,
 		EstimatedCorridorEdgeNearDistance,
 		EstimatedCorridorEdgeClearanceDifference,
 		EstimatedCorridorAxisLength,
@@ -4910,6 +5395,10 @@ void UCombatEngagementSlotComponent::DrawCombatSpaceAnalysisDebug() const
 		IsCorridorFormationActive() ? 2 : 0,
 		IsCorridorFormationActive() ? ActiveCorridorLaneCount : 0,
 		IsCorridorFormationActive() ? MaximumDynamicRowLaneCount : 0,
+		IsCorridorFormationActive() ? WaitRowSideCounts[0] : 0,
+		IsCorridorFormationActive() ? WaitRowSideCounts[1] : 0,
+		IsCorridorFormationActive() ? HoldingRowSideCounts[0] : 0,
+		IsCorridorFormationActive() ? HoldingRowSideCounts[1] : 0,
 		IsCorridorFormationActive() ? ValidAttackCandidateCount : 0,
 		IsCorridorFormationActive() ? CorridorAttackProbeLocations.Num() : 0,
 		IsCorridorFormationActive() ? SelectedAttackCandidateCount : 0,
@@ -4927,4 +5416,117 @@ void UCombatEngagementSlotComponent::DrawCombatSpaceAnalysisDebug() const
 		0.12f,
 		false,
 		1.0f);
+
+	if (!IsCorridorFormationActive())
+	{
+		return;
+	}
+
+	int32 ReservedCounts[4][2] = {};
+	int32 ArrivedCounts[4][2] = {};
+	const float ArrivedDistanceSquared = FMath::Square(FMath::Max(1.0f, PromotionArrivalRadius));
+	auto AccumulateReservedLayer = [this, ArrivedDistanceSquared, &ReservedCounts, &ArrivedCounts](
+		const TArray<TWeakObjectPtr<AActor>>& Reservations,
+		const TArray<FCorridorRowSlot>& Layout,
+		int32 LayerIndex)
+	{
+		for (int32 SlotIndex = 0; SlotIndex < Reservations.Num(); ++SlotIndex)
+		{
+			AActor* Requester = Reservations[SlotIndex].Get();
+			if (!Requester || !Layout.IsValidIndex(SlotIndex))
+			{
+				continue;
+			}
+			const int32 SideIndex = Layout[SlotIndex].SideIndex;
+			if (!FMath::IsWithin(SideIndex, 0, 2))
+			{
+				continue;
+			}
+			++ReservedCounts[LayerIndex][SideIndex];
+			if (FVector::DistSquared2D(
+				Requester->GetActorLocation(),
+				Layout[SlotIndex].WorldLocation) <= ArrivedDistanceSquared)
+			{
+				++ArrivedCounts[LayerIndex][SideIndex];
+			}
+		}
+	};
+	for (int32 SlotIndex = 0; SlotIndex < AttackReservations.Num(); ++SlotIndex)
+	{
+		AActor* Requester = AttackReservations[SlotIndex].Get();
+		if (!Requester || !ActiveCorridorAttackLayout.IsValidIndex(SlotIndex))
+		{
+			continue;
+		}
+		const int32 SideIndex = ActiveCorridorAttackLayout[SlotIndex].SideIndex;
+		if (!FMath::IsWithin(SideIndex, 0, 2))
+		{
+			continue;
+		}
+		++ReservedCounts[0][SideIndex];
+		if (FVector::DistSquared2D(
+			Requester->GetActorLocation(),
+			ActiveCorridorAttackLayout[SlotIndex].WorldLocation) <= ArrivedDistanceSquared)
+		{
+			++ArrivedCounts[0][SideIndex];
+		}
+	}
+	AccumulateReservedLayer(WaitReservations, CorridorWaitRowLayout, 1);
+	AccumulateReservedLayer(HoldingReservations, CorridorHoldingRowLayout, 2);
+
+	const FVector AxisDirection = CorridorFormationRearDirection.GetSafeNormal2D();
+	for (const FEngagementQueueEntry& Entry : EngagementQueue)
+	{
+		AActor* Requester = Entry.Requester.Get();
+		int32 ReservedSlotIndex = INDEX_NONE;
+		if (!Requester
+			|| FindReservation(AttackReservations, Requester, ReservedSlotIndex)
+			|| FindReservation(WaitReservations, Requester, ReservedSlotIndex)
+			|| FindReservation(HoldingReservations, Requester, ReservedSlotIndex))
+		{
+			continue;
+		}
+
+		int32 PendingIndex = INDEX_NONE;
+		FVector PendingLocation;
+		if (!FindPendingRequesterIndex(Requester, PendingIndex)
+			|| !GetCorridorPendingWorldLocation(PendingIndex, PendingLocation))
+		{
+			continue;
+		}
+		const int32 SideIndex = FVector::DotProduct(
+			PendingLocation - EngagementAnchorLocation,
+			AxisDirection) >= 0.0f ? 0 : 1;
+		++ReservedCounts[3][SideIndex];
+		if (FVector::DistSquared2D(
+			Requester->GetActorLocation(),
+			PendingLocation) <= ArrivedDistanceSquared)
+		{
+			++ArrivedCounts[3][SideIndex];
+		}
+	}
+
+	const FString OccupancyDebugText = FString::Printf(
+		TEXT("MouthSides Layout W:%d/%d H:%d/%d | Assigned A:%d/%d W:%d/%d H:%d/%d TargetQ:%d/%d | NearTarget A:%d/%d W:%d/%d H:%d/%d Q:%d/%d"),
+		WaitRowSideCounts[0],
+		WaitRowSideCounts[1],
+		HoldingRowSideCounts[0],
+		HoldingRowSideCounts[1],
+		ReservedCounts[0][0], ReservedCounts[0][1],
+		ReservedCounts[1][0], ReservedCounts[1][1],
+		ReservedCounts[2][0], ReservedCounts[2][1],
+		ReservedCounts[3][0], ReservedCounts[3][1],
+		ArrivedCounts[0][0], ArrivedCounts[0][1],
+		ArrivedCounts[1][0], ArrivedCounts[1][1],
+		ArrivedCounts[2][0], ArrivedCounts[2][1],
+		ArrivedCounts[3][0], ArrivedCounts[3][1]);
+	DrawDebugString(
+		World,
+		Owner->GetActorLocation() + FVector(0.0f, 0.0f, 210.0f),
+		OccupancyDebugText,
+		nullptr,
+		bMouthMixedActive ? FColor::Orange : FColor::Silver,
+		0.12f,
+		false,
+		0.9f);
 }

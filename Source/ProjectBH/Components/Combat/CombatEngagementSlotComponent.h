@@ -300,9 +300,21 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Space Analysis", meta = (ClampMin = "1.0"))
 	float CorridorMouthExpansionRatio = 1.4f;
 
-	/** Mouth evidence exits Corridor faster than the normal noisy-space hysteresis. */
+	/** Continuous raw directional mouth evidence required before entering MouthMixed. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Space Analysis", meta = (ClampMin = "0.0", Units = "s", DisplayName = "Mouth Mixed Enter Duration"))
+	float MouthMixedEnterDuration = 0.3f;
+
+	/** Keeps each directional mouth alive across a brief missed probe sample. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Space Analysis", meta = (ClampMin = "0.0", Units = "s"))
-	float CorridorMouthExitDuration = 0.3f;
+	float CorridorMouthEvidenceHoldDuration = 0.5f;
+
+	/** Continuous contradictory raw evidence required before changing the active MouthMixed side kind. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Space Analysis", meta = (ClampMin = "0.0", Units = "s"))
+	float MouthMixedKindChangeDuration = 0.6f;
+
+	/** Keeps the last committed formation across brief failures to project the player onto NavMesh. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Space Analysis", meta = (ClampMin = "0.0", Units = "s"))
+	float SpaceAnalysisInvalidGraceDuration = 0.6f;
 
 	/** Probe clearance required for a direction to belong to a broad Pocket opening. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Space Analysis", meta = (ClampMin = "100.0", Units = "cm"))
@@ -377,6 +389,10 @@ protected:
 	/** A changed row topology must remain stable this long before slot indices are repacked. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Corridor Formation", meta = (ClampMin = "0.0", Units = "s"))
 	float CorridorRowLayoutCommitDelay = 0.35f;
+
+	/** Extra rows inspected after one side alone can fill a layer, so the opposite side can still share capacity. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Corridor Formation", meta = (ClampMin = "0", ClampMax = "32"))
+	int32 CorridorSideBalanceSearchExtraRows = 6;
 
 	/** Maximum distance allowed between a dynamic row point and its NavMesh projection. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Corridor Formation", meta = (ClampMin = "0.0", Units = "cm"))
@@ -465,6 +481,14 @@ protected:
 	bool bDrawDebugSlots = true;
 
 private:
+	enum class EMouthMixedKind : uint8
+	{
+		None,
+		Side0Open,
+		Side1Open,
+		DoubleMouth
+	};
+
 	struct FCorridorAttackSlot
 	{
 		FVector WorldLocation = FVector::ZeroVector;
@@ -494,6 +518,8 @@ private:
 		FVector& OutSide0,
 		FVector& OutSide1) const;
 	void HandleCombatSpaceModeChanged(EBHCombatSpaceMode PreviousMode);
+	void UpdateMouthMixedState(float SampleDeltaTime);
+	void SetMouthMixedState(bool bNewActive, EMouthMixedKind NewKind = EMouthMixedKind::None);
 	void UpdateCorridorFormationDirection();
 	void UpdatePocketFormationDirection();
 	void RefreshCorridorFormationCapacity(float DeltaTime);
@@ -521,6 +547,12 @@ private:
 		int32 RowIndex,
 		float LongitudinalDistance,
 		TArray<FCorridorRowSlot>& OutRowSlots) const;
+	bool BuildMouthMixedFanRowSlots(
+		int32 SideIndex,
+		int32 RowIndex,
+		float LongitudinalDistance,
+		TArray<FCorridorRowSlot>& OutRowSlots) const;
+	bool IsMouthMixedFanSide(int32 SideIndex) const;
 	bool AreCorridorRowLayoutsEquivalent(
 		const TArray<FCorridorRowSlot>& LayoutA,
 		const TArray<FCorridorRowSlot>& LayoutB) const;
@@ -665,6 +697,7 @@ private:
 	EBHCombatSpaceMode CurrentSpaceMode = EBHCombatSpaceMode::Open;
 	EBHCombatSpaceMode CandidateSpaceMode = EBHCombatSpaceMode::Open;
 	bool bHasValidSpaceAnalysis = false;
+	float SpaceAnalysisInvalidGraceRemaining = 0.0f;
 	float SpaceAnalysisElapsed = 0.0f;
 	float SpaceModeTransitionElapsed = 0.0f;
 	float EstimatedCorridorWidth = 0.0f;
@@ -673,7 +706,19 @@ private:
 	float EstimatedCorridorEdgeNearDistance = 0.0f;
 	float EstimatedCorridorEdgeClearanceDifference = 0.0f;
 	bool bCorridorEdgePocketActive = false;
+	bool bRawCorridorMouthDetected = false;
 	bool bCorridorMouthDetected = false;
+	float CorridorMouthEvidenceHoldRemaining = 0.0f;
+	bool bRawCorridorForwardMouthDetected = false;
+	bool bRawCorridorRearMouthDetected = false;
+	bool bCorridorForwardMouthDetected = false;
+	bool bCorridorRearMouthDetected = false;
+	float CorridorForwardMouthEvidenceHoldRemaining = 0.0f;
+	float CorridorRearMouthEvidenceHoldRemaining = 0.0f;
+	bool bMouthMixedActive = false;
+	float MouthMixedEvidenceElapsed = 0.0f;
+	EMouthMixedKind PendingMouthMixedKind = EMouthMixedKind::None;
+	EMouthMixedKind ActiveMouthMixedKind = EMouthMixedKind::None;
 	bool bCorridorForwardCrossSectionValid = false;
 	bool bCorridorRearCrossSectionValid = false;
 	float EstimatedCorridorForwardWidth = 0.0f;
