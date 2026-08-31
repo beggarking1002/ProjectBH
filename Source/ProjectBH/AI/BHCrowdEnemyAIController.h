@@ -224,6 +224,7 @@ private:
 	float StuckElapsed = 0.0f;
 	float LastDistanceToSlot = 0.0f;
 	bool bHasProgressSample = false;
+	bool bIsChainingIntermediateRoute = false;
 
 	EBHCombatSlotType ExcludedSlotType = EBHCombatSlotType::None;
 	int32 ExcludedSlotIndex = INDEX_NONE;

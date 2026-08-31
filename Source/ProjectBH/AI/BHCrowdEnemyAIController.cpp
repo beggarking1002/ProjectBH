@@ -16,6 +16,25 @@
 #include "NavigationSystem.h"
 #include "TimerManager.h"
 
+namespace
+{
+bool IsIntermediateCombatRouteStage(EBHCombatMoveRouteStage RouteStage)
+{
+	switch (RouteStage)
+	{
+	case EBHCombatMoveRouteStage::ApproachRing:
+	case EBHCombatMoveRouteStage::AlignOnRing:
+	case EBHCombatMoveRouteStage::BypassCorePositive:
+	case EBHCombatMoveRouteStage::BypassCoreNegative:
+		return true;
+	case EBHCombatMoveRouteStage::Direct:
+	case EBHCombatMoveRouteStage::Ingress:
+	default:
+		return false;
+	}
+}
+}
+
 void ABHCrowdEnemyAIController::OnPossess(APawn* InPawn)
 {
 	Super::OnPossess(InPawn);
@@ -79,6 +98,7 @@ void ABHCrowdEnemyAIController::ApplyCrowdFollowingSettings()
 	CrowdFollowing->SetCrowdAnticipateTurns(bEnableCrowdAnticipateTurns);
 	CrowdFollowing->SetCrowdCollisionQueryRange(FMath::Max(0.0f, CrowdCollisionQueryRange));
 	CrowdFollowing->SetCrowdAvoidanceRangeMultiplier(FMath::Max(0.1f, CrowdAvoidanceRangeMultiplier));
+	CrowdFollowing->SetCrowdSlowdownAtGoal(true);
 
 	UE_LOG(
 		LogProjectBH,
@@ -122,6 +142,14 @@ void ABHCrowdEnemyAIController::OnMoveCompleted(FAIRequestID RequestID, const FP
 	{
 		bHasRequestedSlotMove = false;
 		ResetStuckTracking();
+		if (IsIntermediateCombatRouteStage(CurrentMoveRouteStage)
+			&& !bIsChainingIntermediateRoute
+			&& CurrentSlotType != EBHCombatSlotType::None
+			&& IsValid(CurrentSlotComponent))
+		{
+			TGuardValue<bool> ChainingGuard(bIsChainingIntermediateRoute, true);
+			RefreshTargetAndMove();
+		}
 		return;
 	}
 
@@ -636,6 +664,10 @@ void ABHCrowdEnemyAIController::RequestPursuitMove(
 	{
 		return;
 	}
+	if (UCrowdFollowingComponent* CrowdFollowing = Cast<UCrowdFollowingComponent>(GetPathFollowingComponent()))
+	{
+		CrowdFollowing->SetCrowdSlowdownAtGoal(true);
+	}
 
 	const EPathFollowingRequestResult::Type RequestResult = MoveToLocation(
 		PursuitGoal,
@@ -822,6 +854,11 @@ void ABHCrowdEnemyAIController::RequestMoveToReservedSlot(
 	const FVector& SlotLocation,
 	float AcceptanceRadius)
 {
+	if (UCrowdFollowingComponent* CrowdFollowing = Cast<UCrowdFollowingComponent>(GetPathFollowingComponent()))
+	{
+		CrowdFollowing->SetCrowdSlowdownAtGoal(!IsIntermediateCombatRouteStage(CurrentMoveRouteStage));
+	}
+
 	const EPathFollowingRequestResult::Type RequestResult = MoveToLocation(
 		SlotLocation,
 		AcceptanceRadius,
