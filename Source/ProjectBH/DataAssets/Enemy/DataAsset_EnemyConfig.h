@@ -10,6 +10,14 @@
 class UAnimMontage;
 class UGameplayEffect;
 
+/** Coarse body-size policy consumed by navigation and engagement slots. */
+UENUM(BlueprintType)
+enum class EBHEnemySizeClass : uint8
+{
+	Normal,
+	Large
+};
+
 /** Asset bindings for one attack. Numeric combat rules are read through AttackDefinition. */
 USTRUCT(BlueprintType)
 struct PROJECTBH_API FBHEnemyAttackConfig
@@ -41,8 +49,32 @@ class PROJECTBH_API UDataAsset_EnemyConfig : public UDataAsset
 	GENERATED_BODY()
 
 public:
+	/** Gameplay size policy. This does not require a separate Enemy C++ subclass. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Body")
+	EBHEnemySizeClass SizeClass = EBHEnemySizeClass::Normal;
+
+	/** Optional runtime capsule radius. Zero preserves the value configured on the Enemy Blueprint. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Body", meta = (ClampMin = "0.0", Units = "cm"))
+	float CapsuleRadiusOverride = 0.0f;
+
+	/** Optional runtime capsule half height. Zero preserves the value configured on the Enemy Blueprint. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Body", meta = (ClampMin = "0.0", Units = "cm"))
+	float CapsuleHalfHeightOverride = 0.0f;
+
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Movement", meta = (ClampMin = "0.0", Units = "cm/s"))
 	float MaxWalkSpeed = 300.0f;
+
+	/** Capacity consumed from the currently active Attack row. Normal enemies use one; Large enemies normally use two. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Engagement", meta = (ClampMin = "1", UIMin = "1"))
+	int32 AttackSlotCost = 1;
+
+	/** Minimum center distance from every other occupied Attack slot. Zero preserves legacy spacing. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Engagement", meta = (ClampMin = "0.0", Units = "cm"))
+	float AttackSlotExclusionRadius = 0.0f;
+
+	/** Maximum simultaneous Attack owners of this size class. Zero means unlimited. Large enemies normally use one. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Engagement", meta = (ClampMin = "0", UIMin = "0"))
+	int32 MaxConcurrentAttackersOfSize = 0;
 
 	/** Extra time allowed after the expected montage duration before forcing recovery. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat", meta = (ClampMin = "0.0", Units = "s"))

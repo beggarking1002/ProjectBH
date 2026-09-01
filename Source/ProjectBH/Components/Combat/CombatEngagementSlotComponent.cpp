@@ -1744,6 +1744,10 @@ void UCombatEngagementSlotComponent::ReconcileCorridorAttackReservations()
 			{
 				continue;
 			}
+			if (!CanRequesterOccupyAttackSlot(Requester, SlotIndex))
+			{
+				continue;
+			}
 
 			float PathScore = 0.0f;
 			if (!GetNavigationPathScore(Requester, SlotLocation, PathScore))
@@ -1851,6 +1855,10 @@ bool UCombatEngagementSlotComponent::ReconcilePocketAttackReservations()
 		for (int32 SlotIndex = 0; SlotIndex < GetActiveAttackSlotCount(); ++SlotIndex)
 		{
 			if (AttackReservations[SlotIndex].IsValid())
+			{
+				continue;
+			}
+			if (!CanRequesterOccupyAttackSlot(Requester, SlotIndex))
 			{
 				continue;
 			}
@@ -2174,6 +2182,10 @@ bool UCombatEngagementSlotComponent::FindCorridorWaitAdmissionForAttackSlot(
 			|| (!bAllowOtherSide
 				&& CorridorWaitRowLayout[WaitSlotIndex].SideIndex != TargetSideIndex)
 			|| CurrentTime < GetAttackEligibleTime(Requester))
+		{
+			continue;
+		}
+		if (!CanRequesterOccupyAttackSlot(Requester, AttackSlotIndex))
 		{
 			continue;
 		}
@@ -3520,7 +3532,8 @@ void UCombatEngagementSlotComponent::UpdateAttackVacancyTimers(float DeltaTime)
 	{
 		const bool bTrackVacancy = !IsInitialFormationActive()
 			&& SlotIndex < ActiveAttackSlotCount
-			&& !AttackReservations[SlotIndex].IsValid();
+			&& !AttackReservations[SlotIndex].IsValid()
+			&& !IsAttackSlotBlockedByCurrentOccupancy(SlotIndex);
 		AttackSlotVacantElapsed[SlotIndex] = bTrackVacancy
 			? AttackSlotVacantElapsed[SlotIndex] + SafeDeltaTime
 			: 0.0f;
@@ -3671,6 +3684,10 @@ bool UCombatEngagementSlotComponent::ExecuteCoreIntrusionHandover(
 		{
 			return false;
 		}
+	}
+	if (!CanRequesterOccupyAttackSlot(Intruder, AttackSlotIndex, AttackOwner))
+	{
+		return false;
 	}
 
 	AttackReservations[AttackSlotIndex] = Intruder;
@@ -3897,6 +3914,10 @@ bool UCombatEngagementSlotComponent::ExecuteAttackWaitHandover(
 		|| WaitReservations[WaitSlotIndex].Get() != Candidate
 		|| !CurrentAttackOwner
 		|| !Candidate)
+	{
+		return false;
+	}
+	if (!CanRequesterOccupyAttackSlot(Candidate, AttackSlotIndex, CurrentAttackOwner))
 	{
 		return false;
 	}
@@ -4416,6 +4437,10 @@ bool UCombatEngagementSlotComponent::FindBestWaitAdmission(
 			{
 				continue;
 			}
+			if (!CanRequesterOccupyAttackSlot(Requester, AttackSlotIndex))
+			{
+				continue;
+			}
 
 			FVector WaitSlotLocation;
 			if (!GetSlotWorldLocation(EBHCombatSlotType::Wait, WaitSlotIndex, WaitSlotLocation)
@@ -4499,6 +4524,10 @@ bool UCombatEngagementSlotComponent::FindBestWaitAdmissionForAttackSlot(
 		{
 			continue;
 		}
+		if (!CanRequesterOccupyAttackSlot(Requester, AttackSlotIndex))
+		{
+			continue;
+		}
 
 		FVector WaitSlotLocation;
 		if (!GetSlotWorldLocation(EBHCombatSlotType::Wait, WaitSlotIndex, WaitSlotLocation)
@@ -4566,6 +4595,10 @@ bool UCombatEngagementSlotComponent::FindBestInitialAttackAssignment(
 		{
 			AActor* Requester = Entry.Requester.Get();
 			if (!Requester || IsRequesterReserved(Requester) || CurrentTime < Entry.AttackEligibleTime)
+			{
+				continue;
+			}
+			if (!CanRequesterOccupyAttackSlot(Requester, AttackSlotIndex))
 			{
 				continue;
 			}
@@ -4849,7 +4882,9 @@ void UCombatEngagementSlotComponent::ReformRingReservations(
 		return SlotType == EBHCombatSlotType::Attack
 			&& Enemy
 			&& (Enemy->GetCombatState() == EBHEnemyCombatState::Attacking
-				|| Enemy->GetCombatState() == EBHEnemyCombatState::Recovering);
+				|| Enemy->GetCombatState() == EBHEnemyCombatState::Recovering
+				|| Enemy->GetAttackSlotCost() > 1
+				|| Enemy->GetAttackSlotExclusionRadius() > 0.0f);
 	};
 
 	// Preserve the occupied slot set and layer roles. Only exchange two owners
@@ -4939,6 +4974,170 @@ void UCombatEngagementSlotComponent::ReformRingReservations(
 	}
 }
 
+int32 UCombatEngagementSlotComponent::GetOccupiedAttackSlotCost() const
+{
+	int32 TotalCost = 0;
+	for (const TWeakObjectPtr<AActor>& Reservation : AttackReservations)
+	{
+		const ABHEnemy* Enemy = Cast<ABHEnemy>(Reservation.Get());
+		if (Enemy)
+		{
+			TotalCost += Enemy->GetAttackSlotCost();
+		}
+		else if (Reservation.IsValid())
+		{
+			++TotalCost;
+		}
+	}
+	return TotalCost;
+}
+
+bool UCombatEngagementSlotComponent::IsAttackSlotBlockedByCurrentOccupancy(
+	int32 AttackSlotIndex) const
+{
+	if (!AttackReservations.IsValidIndex(AttackSlotIndex)
+		|| AttackSlotIndex >= GetActiveAttackSlotCount()
+		|| AttackReservations[AttackSlotIndex].IsValid())
+	{
+		return false;
+	}
+
+	if (GetOccupiedAttackSlotCost() >= GetActiveAttackSlotCount())
+	{
+		return true;
+	}
+
+	FVector CandidateLocation;
+	if (!GetSlotWorldLocation(
+		EBHCombatSlotType::Attack,
+		AttackSlotIndex,
+		CandidateLocation))
+	{
+		return true;
+	}
+
+	for (int32 OtherSlotIndex = 0; OtherSlotIndex < AttackReservations.Num(); ++OtherSlotIndex)
+	{
+		const ABHEnemy* OtherEnemy = Cast<ABHEnemy>(AttackReservations[OtherSlotIndex].Get());
+		const float ExclusionRadius = OtherEnemy
+			? OtherEnemy->GetAttackSlotExclusionRadius()
+			: 0.0f;
+		if (ExclusionRadius <= 0.0f)
+		{
+			continue;
+		}
+
+		FVector OtherSlotLocation;
+		if (!GetSlotWorldLocation(
+			EBHCombatSlotType::Attack,
+			OtherSlotIndex,
+			OtherSlotLocation)
+			|| FVector::DistSquared2D(CandidateLocation, OtherSlotLocation)
+				< FMath::Square(ExclusionRadius))
+		{
+			return true;
+		}
+	}
+
+	return false;
+}
+
+bool UCombatEngagementSlotComponent::CanRequesterOccupyAttackSlot(
+	AActor* Requester,
+	int32 AttackSlotIndex,
+	const AActor* ReplacedRequester) const
+{
+	const ABHEnemy* Enemy = Cast<ABHEnemy>(Requester);
+	if (!Enemy
+		|| !AttackReservations.IsValidIndex(AttackSlotIndex)
+		|| AttackSlotIndex >= GetActiveAttackSlotCount())
+	{
+		return false;
+	}
+
+	const AActor* ExistingOwner = AttackReservations[AttackSlotIndex].Get();
+	if (ExistingOwner
+		&& ExistingOwner != Requester
+		&& ExistingOwner != ReplacedRequester)
+	{
+		return false;
+	}
+
+	int32 ExistingCost = 0;
+	int32 SameSizeAttackerCount = 0;
+	for (const TWeakObjectPtr<AActor>& Reservation : AttackReservations)
+	{
+		const AActor* OtherRequester = Reservation.Get();
+		if (!OtherRequester
+			|| OtherRequester == Requester
+			|| OtherRequester == ReplacedRequester)
+		{
+			continue;
+		}
+
+		const ABHEnemy* OtherEnemy = Cast<ABHEnemy>(OtherRequester);
+		ExistingCost += OtherEnemy ? OtherEnemy->GetAttackSlotCost() : 1;
+		if (OtherEnemy && OtherEnemy->GetEnemySizeClass() == Enemy->GetEnemySizeClass())
+		{
+			++SameSizeAttackerCount;
+		}
+	}
+
+	if (ExistingCost + Enemy->GetAttackSlotCost() > GetActiveAttackSlotCount())
+	{
+		return false;
+	}
+
+	const int32 SizeClassLimit = Enemy->GetMaxConcurrentAttackersOfSize();
+	if (SizeClassLimit > 0 && SameSizeAttackerCount >= SizeClassLimit)
+	{
+		return false;
+	}
+
+	FVector CandidateLocation;
+	if (!GetSlotWorldLocation(
+		EBHCombatSlotType::Attack,
+		AttackSlotIndex,
+		CandidateLocation))
+	{
+		return false;
+	}
+
+	const float RequesterExclusionRadius = Enemy->GetAttackSlotExclusionRadius();
+	for (int32 OtherSlotIndex = 0; OtherSlotIndex < AttackReservations.Num(); ++OtherSlotIndex)
+	{
+		const AActor* OtherRequester = AttackReservations[OtherSlotIndex].Get();
+		if (!OtherRequester
+			|| OtherRequester == Requester
+			|| OtherRequester == ReplacedRequester)
+		{
+			continue;
+		}
+
+		const ABHEnemy* OtherEnemy = Cast<ABHEnemy>(OtherRequester);
+		const float RequiredClearance = FMath::Max(
+			RequesterExclusionRadius,
+			OtherEnemy ? OtherEnemy->GetAttackSlotExclusionRadius() : 0.0f);
+		if (RequiredClearance <= 0.0f)
+		{
+			continue;
+		}
+
+		FVector OtherSlotLocation;
+		if (!GetSlotWorldLocation(
+			EBHCombatSlotType::Attack,
+			OtherSlotIndex,
+			OtherSlotLocation)
+			|| FVector::DistSquared2D(CandidateLocation, OtherSlotLocation)
+				< FMath::Square(RequiredClearance))
+		{
+			return false;
+		}
+	}
+
+	return true;
+}
+
 float UCombatEngagementSlotComponent::GetMaximumAttackSlotDistance(AActor* Requester) const
 {
 	const ABHEnemy* Enemy = Cast<ABHEnemy>(Requester);
@@ -5002,6 +5201,11 @@ bool UCombatEngagementSlotComponent::TryReserveSlot(
 		}
 
 		if ((*Reservations)[SlotIndex].IsValid())
+		{
+			continue;
+		}
+		if (SlotType == EBHCombatSlotType::Attack
+			&& !CanRequesterOccupyAttackSlot(Requester, SlotIndex))
 		{
 			continue;
 		}
@@ -5925,13 +6129,18 @@ void UCombatEngagementSlotComponent::DrawDebugSlots() const
 		if (GetSlotWorldLocation(EBHCombatSlotType::Attack, SlotIndex, SlotLocation))
 		{
 			const bool bOccupied = AttackReservations[SlotIndex].IsValid();
+			const bool bBlockedByOccupancy = !bOccupied
+				&& IsAttackSlotBlockedByCurrentOccupancy(SlotIndex);
 			const bool bVacancyFallbackReady = !bOccupied
+				&& !bBlockedByOccupancy
 				&& AttackSlotVacantElapsed.IsValidIndex(SlotIndex)
 				&& AttackSlotVacantElapsed[SlotIndex]
 					>= FMath::Max(0.0f, AttackVacancyFallbackDelay);
 			const FColor Color = bOccupied
 				? FColor::Red
-				: (bVacancyFallbackReady ? FColor::Orange : FColor::Green);
+				: (bBlockedByOccupancy
+					? FColor(100, 35, 120)
+					: (bVacancyFallbackReady ? FColor::Orange : FColor::Green));
 			DrawDebugSphere(World, SlotLocation, 22.0f, 12, Color, false, 0.12f, 0, 2.0f);
 		}
 	}
@@ -5984,12 +6193,18 @@ void UCombatEngagementSlotComponent::DrawDebugSlots() const
 	}
 
 	int32 OccupiedAttackSlots = 0;
+	int32 BlockedAttackSlots = 0;
 	float MaximumAttackVacancy = 0.0f;
 	for (int32 SlotIndex = 0; SlotIndex < ActiveAttackSlotCount; ++SlotIndex)
 	{
 		const bool bOccupied = AttackReservations[SlotIndex].IsValid();
+		const bool bBlockedByOccupancy = !bOccupied
+			&& IsAttackSlotBlockedByCurrentOccupancy(SlotIndex);
 		OccupiedAttackSlots += bOccupied ? 1 : 0;
-		if (!bOccupied && AttackSlotVacantElapsed.IsValidIndex(SlotIndex))
+		BlockedAttackSlots += bBlockedByOccupancy ? 1 : 0;
+		if (!bOccupied
+			&& !bBlockedByOccupancy
+			&& AttackSlotVacantElapsed.IsValidIndex(SlotIndex))
 		{
 			MaximumAttackVacancy = FMath::Max(
 				MaximumAttackVacancy,
@@ -6017,9 +6232,12 @@ void UCombatEngagementSlotComponent::DrawDebugSlots() const
 	}
 
 	const FString DebugText = FString::Printf(
-		TEXT("Slots A:%d/%d W:%d/%d H:%d/%d Q:%d | Phase:%s | Reform:%d | Attacking:%d NonAttack:%d | Spacing:%d Peak:%d | VacA:%.1f Promote:%s"),
+		TEXT("Slots A:%d/%d Cost:%d/%d Blocked:%d W:%d/%d H:%d/%d Q:%d | Phase:%s | Reform:%d | Attacking:%d NonAttack:%d | Spacing:%d Peak:%d | VacA:%.1f Promote:%s"),
 		OccupiedAttackSlots,
 		ActiveAttackSlotCount,
+		GetOccupiedAttackSlotCost(),
+		ActiveAttackSlotCount,
+		BlockedAttackSlots,
 		OccupiedWaitSlots,
 		WaitReservations.Num(),
 		OccupiedHoldingSlots,

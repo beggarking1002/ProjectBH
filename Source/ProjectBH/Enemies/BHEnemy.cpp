@@ -40,11 +40,7 @@ void ABHEnemy::BeginPlay()
 {
 	Super::BeginPlay();
 	ConfigureLiveCollision();
-
-	if (EnemyConfigDataAsset)
-	{
-		GetCharacterMovement()->MaxWalkSpeed = EnemyConfigDataAsset->MaxWalkSpeed;
-	}
+	ApplyEnemyConfigRuntimeSettings();
 
 	if (HasAuthority() && GetBHAbilitySystemComponent())
 	{
@@ -153,6 +149,7 @@ bool ABHEnemy::ActivateFromPool(const FTransform& SpawnTransform)
 	SetLifeSpan(0.0f);
 	SetActorTransform(SpawnTransform, false, nullptr, ETeleportType::TeleportPhysics);
 	ResetGameplayStateForPoolActivation();
+	ApplyEnemyConfigRuntimeSettings();
 	SetCombatState(EBHEnemyCombatState::Chasing);
 	bIsPoolInWorld = true;
 	ApplyPoolPresentationState(true);
@@ -160,9 +157,11 @@ bool ABHEnemy::ActivateFromPool(const FTransform& SpawnTransform)
 	MulticastSetDeathCollisionEnabled(true);
 
 	GetCharacterMovement()->SetMovementMode(MOVE_Walking);
-	GetCharacterMovement()->MaxWalkSpeed = EnemyConfigDataAsset
-		? EnemyConfigDataAsset->MaxWalkSpeed
-		: 300.0f;
+	if (!EnemyConfigDataAsset)
+	{
+		// Preserve the legacy pool fallback for deliberately unconfigured test enemies.
+		GetCharacterMovement()->MaxWalkSpeed = 300.0f;
+	}
 	SpawnDefaultController();
 	if (!Controller)
 	{
@@ -578,6 +577,49 @@ void ABHEnemy::ConfigureLiveCollision()
 	Capsule->SetCollisionResponseToChannel(ECC_WorldDynamic, ECR_Block);
 }
 
+void ABHEnemy::ApplyEnemyConfigRuntimeSettings()
+{
+	if (!EnemyConfigDataAsset)
+	{
+		return;
+	}
+
+	UCharacterMovementComponent* Movement = GetCharacterMovement();
+	UCapsuleComponent* Capsule = GetCapsuleComponent();
+	if (Movement)
+	{
+		Movement->MaxWalkSpeed = FMath::Max(0.0f, EnemyConfigDataAsset->MaxWalkSpeed);
+	}
+
+	if (!Capsule)
+	{
+		return;
+	}
+
+	const float ConfiguredRadius = EnemyConfigDataAsset->CapsuleRadiusOverride;
+	const float ConfiguredHalfHeight = EnemyConfigDataAsset->CapsuleHalfHeightOverride;
+	if (ConfiguredRadius <= 0.0f && ConfiguredHalfHeight <= 0.0f)
+	{
+		return;
+	}
+
+	const float CapsuleRadius = ConfiguredRadius > 0.0f
+		? ConfiguredRadius
+		: Capsule->GetUnscaledCapsuleRadius();
+	const float CapsuleHalfHeight = FMath::Max(
+		CapsuleRadius,
+		ConfiguredHalfHeight > 0.0f
+			? ConfiguredHalfHeight
+			: Capsule->GetUnscaledCapsuleHalfHeight());
+	Capsule->SetCapsuleSize(CapsuleRadius, CapsuleHalfHeight, true);
+	if (Movement)
+	{
+		// Keep Detour/path-following agent dimensions synchronized with the body
+		// configured by the Enemy Data Asset.
+		Movement->UpdateNavAgent(*Capsule);
+	}
+}
+
 void ABHEnemy::ApplyPoolPresentationState(bool bActive)
 {
 	SetActorHiddenInGame(!bActive);
@@ -682,6 +724,34 @@ float ABHEnemy::GetAttackStartRange() const
 	const FBHEnemyAttackConfig* AttackConfig = GetDefaultAttackConfig();
 	const FBHAttackDefinitionRow* AttackDefinition = AttackConfig ? GetAttackDefinition(*AttackConfig) : nullptr;
 	return AttackDefinition ? AttackDefinition->AttackStartRange : 150.0f;
+}
+
+EBHEnemySizeClass ABHEnemy::GetEnemySizeClass() const
+{
+	return EnemyConfigDataAsset
+		? EnemyConfigDataAsset->SizeClass
+		: EBHEnemySizeClass::Normal;
+}
+
+int32 ABHEnemy::GetAttackSlotCost() const
+{
+	return EnemyConfigDataAsset
+		? FMath::Max(1, EnemyConfigDataAsset->AttackSlotCost)
+		: 1;
+}
+
+float ABHEnemy::GetAttackSlotExclusionRadius() const
+{
+	return EnemyConfigDataAsset
+		? FMath::Max(0.0f, EnemyConfigDataAsset->AttackSlotExclusionRadius)
+		: 0.0f;
+}
+
+int32 ABHEnemy::GetMaxConcurrentAttackersOfSize() const
+{
+	return EnemyConfigDataAsset
+		? FMath::Max(0, EnemyConfigDataAsset->MaxConcurrentAttackersOfSize)
+		: 0;
 }
 
 const FBHEnemyAttackConfig* ABHEnemy::GetAttackConfig(FName AttackId) const

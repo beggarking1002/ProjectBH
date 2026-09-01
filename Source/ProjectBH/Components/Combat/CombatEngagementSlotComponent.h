@@ -750,6 +750,12 @@ private:
 	void ReformReservations();
 	void ReformRingReservations(TArray<TWeakObjectPtr<AActor>>& Reservations, EBHCombatSlotType SlotType);
 	float GetMaximumAttackSlotDistance(AActor* Requester) const;
+	int32 GetOccupiedAttackSlotCost() const;
+	bool IsAttackSlotBlockedByCurrentOccupancy(int32 AttackSlotIndex) const;
+	bool CanRequesterOccupyAttackSlot(
+		AActor* Requester,
+		int32 AttackSlotIndex,
+		const AActor* ReplacedRequester = nullptr) const;
 	bool TryReserveSlot(AActor* Requester, EBHCombatSlotType SlotType, float MaxDistanceFromOwner = -1.0f, int32 ExcludedSlotIndex = INDEX_NONE);
 	bool FindReservation(const TArray<TWeakObjectPtr<AActor>>& Reservations, AActor* Requester, int32& OutSlotIndex) const;
 	bool GetSlotWorldLocation(EBHCombatSlotType SlotType, int32 SlotIndex, FVector& OutWorldLocation) const;

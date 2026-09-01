@@ -4,14 +4,13 @@
 
 #include "CoreMinimal.h"
 #include "../BHBaseCharacter.h"
+#include "../DataAssets/Enemy/DataAsset_EnemyConfig.h"
 #include "BHEnemy.generated.h"
 
 class UAnimMontage;
-class UDataAsset_EnemyConfig;
 class ABHEnemyPoolManager;
 struct FOnAttributeChangeData;
 struct FBHAttackDefinitionRow;
-struct FBHEnemyAttackConfig;
 
 /** Replicated high-level state used by enemy animation and combat presentation. */
 UENUM(BlueprintType)
@@ -84,6 +83,21 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Combat|Enemy")
 	float GetAttackStartRange() const;
 
+	UFUNCTION(BlueprintPure, Category = "Combat|Enemy|Size")
+	EBHEnemySizeClass GetEnemySizeClass() const;
+
+	/** Capacity consumed from the target's active Attack row. */
+	UFUNCTION(BlueprintPure, Category = "Combat|Enemy|Size")
+	int32 GetAttackSlotCost() const;
+
+	/** Required center clearance from other occupied Attack slots. */
+	UFUNCTION(BlueprintPure, Category = "Combat|Enemy|Size")
+	float GetAttackSlotExclusionRadius() const;
+
+	/** Zero means the size class has no separate simultaneous-Attack cap. */
+	UFUNCTION(BlueprintPure, Category = "Combat|Enemy|Size")
+	int32 GetMaxConcurrentAttackersOfSize() const;
+
 	UFUNCTION(BlueprintPure, Category = "Debug|Enemy")
 	int32 GetSuccessfulAttackStartCount() const { return SuccessfulAttackStartCount; }
 
@@ -147,6 +161,7 @@ private:
 	void Die();
 	void DisableDeathCollision();
 	void ConfigureLiveCollision();
+	void ApplyEnemyConfigRuntimeSettings();
 	void ApplyPoolPresentationState(bool bActive);
 	void DestroyCurrentAIController();
 	void ResetGameplayStateForPoolActivation();
