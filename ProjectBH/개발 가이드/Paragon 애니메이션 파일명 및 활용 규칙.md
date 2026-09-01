@@ -19,7 +19,7 @@
 
 ### 첫 검방 수직 슬라이스
 
-`AM_Greystone_LightCombo`는 우선 `DefaultGroup.DefaultSlot`의 **전신 공격**으로 구성한다. 공격 중 이동 입력과 방향 전환의 세부 정책은 전투 상태에서 제어한다. 이 단계에서 억지로 이동 공격을 섞지 않는다.
+현재 이동 허용 기본 공격은 `CombatGroup.UpperBody`로 구성한다. 발 스텝과 골반 회전이 핵심인 공격, 피격, 사망, 구르기는 `CombatGroup.FullBody`로 분리한다. 자세한 공통 구조는 [[상하체 애니메이션 분리 및 Enemy Run 연결 절차]]를 따른다.
 
 ### 이동 중 상체 공격이 필요한 단계
 
@@ -37,7 +37,7 @@
 Slot은 Montage가 아니라 **Skeleton Asset에 저장**된다.
 
 1. Greystone Skeleton을 연다.
-2. `Anim Slot Manager`에서 `DefaultGroup` 아래 `DefaultSlot`이 있는지 확인한다. 없으면 `Add Slot (+)`으로 `DefaultSlot`을 만든 뒤 Skeleton을 저장한다.
-3. 이동 상체 공격용은 같은 Group 아래 `UpperBody` Slot을 추가한다.
+2. `Anim Slot Manager`에 `CombatGroup`을 만들고 `UpperBody`, `FullBody` Slot을 추가한 뒤 Skeleton을 저장한다.
+3. 이동 상체 공격은 `UpperBody`, 전신 동작은 `FullBody`를 사용한다.
 4. Montage로 돌아가 Slot Track의 드롭다운 또는 우클릭 메뉴에서 `New Slot`을 선택하고, 방금 만든 Slot을 지정한다.
 5. 해당 Montage를 실제 재생하려면 Greystone AnimBP에도 같은 이름의 `Slot` 노드가 반드시 있어야 한다.

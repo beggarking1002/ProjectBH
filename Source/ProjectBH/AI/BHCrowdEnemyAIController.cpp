@@ -45,6 +45,11 @@ void ABHCrowdEnemyAIController::OnPossess(APawn* InPawn)
 		return;
 	}
 
+	if (ABHEnemy* ControlledEnemy = Cast<ABHEnemy>(InPawn))
+	{
+		ControlledEnemy->ResetFormationJoinState();
+	}
+
 	ApplyCrowdFollowingSettings();
 	FRandomStream RefreshRandom(InPawn ? InPawn->GetUniqueID() : GetUniqueID());
 	const float MinimumRefreshInterval = FMath::Max(0.1f, TargetRefreshInterval - TargetRefreshJitter);
@@ -208,6 +213,9 @@ void ABHCrowdEnemyAIController::RefreshTargetAndMove()
 	{
 		return;
 	}
+	// Each refresh starts from a non-running presentation intent. Only the
+	// concrete pursuit/Attack ingress paths below opt back into Run.
+	ControlledEnemy->SetWantsRunLocomotion(false);
 
 	if (ControlledEnemy->IsAttackLocked())
 	{
@@ -327,6 +335,7 @@ void ABHCrowdEnemyAIController::RefreshTargetAndMove()
 		{
 			ReleaseCurrentCombatSlot(EBHCombatSlotReleaseReason::LeftEngagementRange);
 		}
+		ControlledEnemy->SetWantsRunLocomotion(true);
 		ApplyMovementIntent(ControlledEnemy, PursuitSpeed, false);
 		RequestPursuitMove(ControlledEnemy);
 		DrawDebugStatus(ControlledEnemy);
@@ -346,8 +355,14 @@ void ABHCrowdEnemyAIController::RefreshTargetAndMove()
 	// charging instead of visibly walking to provisional Wait/Holding slots.
 	if (TargetSlotComponent->IsInitialFormationPending())
 	{
-		AcquireCombatSlot(ControlledEnemy);
-		ApplyMovementIntent(ControlledEnemy, PursuitSpeed, true);
+		const bool bHasInitialReservation = AcquireCombatSlot(ControlledEnemy);
+		const bool bUseInitialRun = !bHasInitialReservation
+			|| CurrentSlotType == EBHCombatSlotType::Attack;
+		ControlledEnemy->SetWantsRunLocomotion(bUseInitialRun);
+		ApplyMovementIntent(
+			ControlledEnemy,
+			bUseInitialRun ? PursuitSpeed : GetCurrentSlotMoveSpeed(ControlledEnemy),
+			true);
 		RequestPursuitMove(ControlledEnemy, InitialChargeStopRadius);
 		DrawDebugStatus(ControlledEnemy);
 		return;
@@ -400,6 +415,21 @@ void ABHCrowdEnemyAIController::RefreshTargetAndMove()
 	const float CurrentMoveSpeed = ControlledEnemy->GetVelocity().Size2D();
 	const bool bCanSettleAtReservedSlot = bAtReservedSlot
 		&& CurrentMoveSpeed <= FMath::Max(0.0f, SlotSettleSpeedThreshold);
+	if (bAtReservedSlot)
+	{
+		// Arrival, not reservation, ends the initial approach run. Keep this
+		// latched through later slot promotions and formation reforms.
+		ControlledEnemy->MarkFormationJoined();
+		ControlledEnemy->SetFormationCatchUpRequired(false);
+	}
+	else
+	{
+		UpdateFormationCatchUpIntent(ControlledEnemy, DistanceToSlot);
+	}
+	const bool bUseRunForCurrentSlot = CurrentSlotType == EBHCombatSlotType::Attack
+		&& (!ControlledEnemy->HasJoinedFormation()
+			|| ControlledEnemy->NeedsFormationCatchUp());
+	ControlledEnemy->SetWantsRunLocomotion(bUseRunForCurrentSlot);
 	if (CurrentSlotType == EBHCombatSlotType::Attack && bAtReservedSlot)
 	{
 		ApplyMovementIntent(ControlledEnemy, AttackIngressSpeed, true);
@@ -435,7 +465,7 @@ void ABHCrowdEnemyAIController::RefreshTargetAndMove()
 
 	if (bAtReservedSlot)
 	{
-		ApplyMovementIntent(ControlledEnemy, GetCurrentSlotMoveSpeed(), true);
+		ApplyMovementIntent(ControlledEnemy, GetCurrentSlotMoveSpeed(ControlledEnemy), true);
 		if (!bCanSettleAtReservedSlot)
 		{
 			DrawDebugStatus(ControlledEnemy);
@@ -452,7 +482,7 @@ void ABHCrowdEnemyAIController::RefreshTargetAndMove()
 
 	ApplyMovementIntent(
 		ControlledEnemy,
-		GetCurrentSlotMoveSpeed(),
+		GetCurrentSlotMoveSpeed(ControlledEnemy),
 		true);
 
 	if (bHasRequestedSlotMove
@@ -740,8 +770,15 @@ void ABHCrowdEnemyAIController::ApplyMovementIntent(
 	}
 }
 
-float ABHCrowdEnemyAIController::GetCurrentSlotMoveSpeed() const
+float ABHCrowdEnemyAIController::GetCurrentSlotMoveSpeed(const ABHEnemy* ControlledEnemy) const
 {
+	if (CurrentSlotType == EBHCombatSlotType::Attack
+		&& ControlledEnemy
+		&& (!ControlledEnemy->HasJoinedFormation() || ControlledEnemy->NeedsFormationCatchUp()))
+	{
+		return FormationCatchUpMoveSpeed;
+	}
+
 	switch (CurrentSlotType)
 	{
 	case EBHCombatSlotType::Attack:
@@ -754,6 +791,46 @@ float ABHCrowdEnemyAIController::GetCurrentSlotMoveSpeed() const
 	case EBHCombatSlotType::None:
 	default:
 		return PursuitSpeed;
+	}
+}
+
+void ABHCrowdEnemyAIController::UpdateFormationCatchUpIntent(
+	ABHEnemy* ControlledEnemy,
+	float DistanceToSlot) const
+{
+	if (!ControlledEnemy)
+	{
+		return;
+	}
+
+	if (!ControlledEnemy->HasJoinedFormation())
+	{
+		ControlledEnemy->SetFormationCatchUpRequired(false);
+		return;
+	}
+	if (CurrentSlotType != EBHCombatSlotType::Attack)
+	{
+		ControlledEnemy->SetFormationCatchUpRequired(false);
+		return;
+	}
+
+	const float ExitDistance = FMath::Max(
+		FMath::Max(0.0f, FormationCatchUpExitDistance),
+		FMath::Max(0.0f, SlotAcceptanceRadius));
+	const float EnterDistance = FMath::Max(
+		ExitDistance,
+		FMath::Max(0.0f, FormationCatchUpEnterDistance));
+
+	if (ControlledEnemy->NeedsFormationCatchUp())
+	{
+		if (DistanceToSlot <= ExitDistance)
+		{
+			ControlledEnemy->SetFormationCatchUpRequired(false);
+		}
+	}
+	else if (DistanceToSlot >= EnterDistance)
+	{
+		ControlledEnemy->SetFormationCatchUpRequired(true);
 	}
 }
 
@@ -784,6 +861,18 @@ void ABHCrowdEnemyAIController::ReleaseCurrentCombatSlot(
 	EBHCombatSlotReleaseReason Reason,
 	bool bTemporarilyExcludeReleasedSlot)
 {
+	if (Reason == EBHCombatSlotReleaseReason::TargetChanged
+		|| Reason == EBHCombatSlotReleaseReason::TargetLost
+		|| Reason == EBHCombatSlotReleaseReason::LeftEngagementRange
+		|| Reason == EBHCombatSlotReleaseReason::UnPossessed
+		|| Reason == EBHCombatSlotReleaseReason::Died)
+	{
+		if (ABHEnemy* ControlledEnemy = Cast<ABHEnemy>(GetPawn()))
+		{
+			ControlledEnemy->ResetFormationJoinState();
+		}
+	}
+
 	const bool bHadReservation = CurrentSlotType != EBHCombatSlotType::None && CurrentSlotIndex != INDEX_NONE;
 	if (bTemporarilyExcludeReleasedSlot && bHadReservation && GetWorld())
 	{
@@ -980,8 +1069,13 @@ bool ABHCrowdEnemyAIController::UpdateStuckTracking(float DistanceToSlot, float 
 		StuckElapsed = 0.0f;
 	}
 
+	const ABHEnemy* ControlledEnemy = Cast<ABHEnemy>(GetPawn());
+	const float EffectiveNoProgressTimeout = ControlledEnemy
+		&& ControlledEnemy->WantsRunLocomotion()
+		? RunNoProgressTimeout
+		: NoProgressTimeout;
 	return StuckElapsed >= StuckTimeout
-		|| NoProgressElapsed >= NoProgressTimeout;
+		|| NoProgressElapsed >= FMath::Max(0.1f, EffectiveNoProgressTimeout);
 }
 
 void ABHCrowdEnemyAIController::ResetStuckTracking()
@@ -1090,8 +1184,11 @@ void ABHCrowdEnemyAIController::DrawDebugStatus(const ABHEnemy* ControlledEnemy)
 	const TCHAR* FacingMode = CharacterMovement && CharacterMovement->bUseControllerDesiredRotation
 		? TEXT("Target")
 		: TEXT("Move");
+	const TCHAR* GaitIntent = ControlledEnemy->WantsRunLocomotion()
+		? (ControlledEnemy->NeedsFormationCatchUp() ? TEXT("CatchUpRun") : TEXT("ApproachRun"))
+		: TEXT("Formation");
 	const FString DebugText = FString::Printf(
-		TEXT("%s/%s %.2fs | Target:%s Held:%.1f | %s[%d] Side:%d Lane:%d Seq:%llu Dist:%.0f Speed:%.1f Facing:%s Route:%s Stuck:%.1f/%.1f Starts:%d | Reform:%s(%d) | Last:%s"),
+		TEXT("%s/%s %.2fs | Target:%s Held:%.1f | %s[%d] Side:%d Lane:%d Seq:%llu Dist:%.0f Speed:%.1f Gait:%s Facing:%s Route:%s Stuck:%.1f/%.1f Starts:%d | Reform:%s(%d) | Last:%s"),
 		*CombatStateName,
 		MovementMode,
 		ResolvedTargetRefreshInterval,
@@ -1104,6 +1201,7 @@ void ABHCrowdEnemyAIController::DrawDebugStatus(const ABHEnemy* ControlledEnemy)
 		static_cast<unsigned long long>(QueueSequence),
 		LastDistanceToSlot,
 		ControlledEnemy->GetVelocity().Size2D(),
+		GaitIntent,
 		FacingMode,
 		*RouteStageName,
 		StuckElapsed,

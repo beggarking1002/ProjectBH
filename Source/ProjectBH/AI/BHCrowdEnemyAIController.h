@@ -126,6 +126,10 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI|Movement Intent", meta = (ClampMin = "0.0", Units = "cm/s"))
 	float HoldingMoveSpeed = 320.0f;
 
+	/** Speed used during initial approach and when a joined enemy must catch up to a distant slot. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI|Movement Intent", meta = (ClampMin = "0.0", Units = "cm/s"))
+	float FormationCatchUpMoveSpeed = 500.0f;
+
 	/** Lead a moving player by this much while outside formation. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI|Pursuit", meta = (ClampMin = "0.0", Units = "s"))
 	float PursuitPredictionTime = 0.35f;
@@ -169,12 +173,24 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI|Engagement Slots", meta = (ClampMin = "1.0", Units = "cm"))
 	float HoldingSlotRepathDistance = 250.0f;
 
+	/** A joined enemy starts running after falling at least this far behind its reserved slot. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI|Engagement Slots", meta = (ClampMin = "0.0", Units = "cm"))
+	float FormationCatchUpEnterDistance = 300.0f;
+
+	/** Catch-up run ends only after getting this close, preventing gait flicker. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI|Engagement Slots", meta = (ClampMin = "0.0", Units = "cm"))
+	float FormationCatchUpExitDistance = 160.0f;
+
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI|Recovery", meta = (ClampMin = "0.1", Units = "s"))
 	float StuckTimeout = 2.0f;
 
 	/** Hard watchdog for agents that keep jittering without getting closer to their move goal. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI|Recovery", meta = (ClampMin = "0.1", Units = "s"))
 	float NoProgressTimeout = 4.0f;
+
+	/** Faster recovery while Run intent makes a no-progress crowd stall visually obvious. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI|Recovery", meta = (ClampMin = "0.1", Units = "s"))
+	float RunNoProgressTimeout = 1.5f;
 
 	/** A recovering Attack owner farther than this from its slot yields immediately. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI|Recovery", meta = (ClampMin = "0.0", Units = "cm"))
@@ -201,7 +217,8 @@ private:
 	bool AcquireCombatSlot(ABHEnemy* ControlledEnemy);
 	void RequestPursuitMove(ABHEnemy* ControlledEnemy, float AcceptanceRadius = 75.0f);
 	void ApplyMovementIntent(ABHEnemy* ControlledEnemy, float MoveSpeed, bool bFaceTarget);
-	float GetCurrentSlotMoveSpeed() const;
+	float GetCurrentSlotMoveSpeed(const ABHEnemy* ControlledEnemy) const;
+	void UpdateFormationCatchUpIntent(ABHEnemy* ControlledEnemy, float DistanceToSlot) const;
 	float GetCurrentSlotRepathDistance() const;
 	void ResetPursuitTracking();
 	void ReleaseCurrentCombatSlot(EBHCombatSlotReleaseReason Reason, bool bTemporarilyExcludeReleasedSlot = false);

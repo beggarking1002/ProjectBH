@@ -57,6 +57,30 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Combat|Enemy")
 	bool IsDead() const { return CombatState == EBHEnemyCombatState::Dead; }
 
+	/** True after this enemy has physically reached any reserved formation slot for its current target. */
+	UFUNCTION(BlueprintPure, Category = "AI|Formation")
+	bool HasJoinedFormation() const { return bHasJoinedFormation; }
+
+	/** Latches formation arrival for animation and presentation. Authority only. */
+	void MarkFormationJoined();
+
+	/** Starts a fresh approach run for a new/lost engagement. Authority only. */
+	void ResetFormationJoinState();
+
+	/** True while a joined enemy is far enough from its current slot to run and catch up. */
+	UFUNCTION(BlueprintPure, Category = "AI|Formation")
+	bool NeedsFormationCatchUp() const { return bNeedsFormationCatchUp; }
+
+	/** Updates the formation catch-up gait intent. Authority only. */
+	void SetFormationCatchUpRequired(bool bRequired);
+
+	/** Authoritative gait request produced by the AI controller. */
+	UFUNCTION(BlueprintPure, Category = "AI|Formation")
+	bool WantsRunLocomotion() const { return bWantsRunLocomotion; }
+
+	/** Sets whether the current AI move should use Run presentation. Authority only. */
+	void SetWantsRunLocomotion(bool bWantsRun);
+
 	UFUNCTION(BlueprintPure, Category = "Combat|Enemy")
 	float GetAttackStartRange() const;
 
@@ -137,6 +161,21 @@ private:
 
 	UPROPERTY(Replicated, VisibleInstanceOnly, BlueprintReadOnly, Category = "Combat|Enemy", meta = (AllowPrivateAccess = "true"))
 	EBHEnemyCombatState CombatState = EBHEnemyCombatState::Chasing;
+
+	/**
+	 * Latched on the first physical arrival at a reserved Attack/Wait/Holding/Pending slot.
+	 * Slot reshuffles preserve it; losing/changing the target or leaving engagement resets it.
+	 */
+	UPROPERTY(Replicated, VisibleInstanceOnly, BlueprintReadOnly, Category = "AI|Formation", meta = (AllowPrivateAccess = "true"))
+	bool bHasJoinedFormation = false;
+
+	/** Hysteresis-controlled run intent used when a joined enemy falls behind its reserved slot. */
+	UPROPERTY(Replicated, VisibleInstanceOnly, BlueprintReadOnly, Category = "AI|Formation", meta = (AllowPrivateAccess = "true"))
+	bool bNeedsFormationCatchUp = false;
+
+	/** Replicated gait request; actual displacement still gates animation playback. */
+	UPROPERTY(Replicated, VisibleInstanceOnly, BlueprintReadOnly, Category = "AI|Formation", meta = (AllowPrivateAccess = "true"))
+	bool bWantsRunLocomotion = false;
 
 	/** True for living enemies and visible corpses; false only while hidden in free storage. */
 	UPROPERTY(ReplicatedUsing = OnRep_PoolInWorld, VisibleInstanceOnly, BlueprintReadOnly, Category = "Enemy Pool", meta = (AllowPrivateAccess = "true"))

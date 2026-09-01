@@ -41,23 +41,14 @@
    - Ground Speed: `0 ~ 400`
    - Direction: `-180 ~ 180`
 5. State Machine 내부 `Jog` State의 `Locomotion_BS`에서 상속 변수 `GroundSpeed`, `Direction`을 각각 같은 이름 핀에 연결한다.
-6. State Machine 바깥의 Anim Graph에서 `Locomotion State Machine` 포즈 출력 → `Slot` 노드 → `Output Animation Pose` 순으로 연결한다. `Jog` State 안에는 Slot을 넣지 않는다.
-7. Slot Name은 `AM_Knight`와 같게 둔다. 기본값이면 둘 다 `DefaultSlot`이다.
+6. State Machine 바깥의 Anim Graph는 [[상하체 애니메이션 분리 및 Enemy Run 연결 절차]]의 Cached Pose, `UpperBody`, `FullBody` 구조로 연결한다. `Jog` State 안에는 Slot을 넣지 않는다.
+7. 이동 허용 3타 콤보는 `AM_Knight`와 AnimGraph 모두 `CombatGroup.UpperBody`를 사용한다.
 
 Event Graph에 GroundSpeed/Direction을 직접 계산하거나 별도 변수를 만들지 않는다. C++ `UBHCharacterAnimInstance`가 매 프레임 값을 계산한다.
 
 ### 공격 Montage를 AnimGraph에 합성하기
 
-공격 전용 State Machine은 현재 필요 없다. C++가 `AM_Knight`를 재생하므로, 최종 포즈 직전에 해당 Montage를 받을 Slot만 추가한다.
-
-1. `ABP_Greystone`을 열고 `Anim Graph` 탭으로 간다.
-2. 기존 `Locomotion State Machine`의 Pose 출력과 `Output Animation Pose` 사이 연결선을 끊는다. `Locomotion_BS`는 State Machine 내부의 `Jog` State에 그대로 둔다.
-3. 빈 곳을 우클릭해 `Slot` 노드를 추가한다.
-4. `Locomotion State Machine` Pose 출력 → `Slot`의 `Source` 입력 → `Output Animation Pose`의 `Result` 순으로 연결한다.
-5. `Slot` 노드를 선택하고 Details의 `Slot Name`을 `DefaultSlot`으로 둔다.
-6. Compile, Save 한다.
-
-`AM_Knight`를 열어 Slot Track의 이름도 `DefaultSlot`인지 확인한다. Slot 이름은 Montage와 AnimBP에서 한 글자라도 다르면 공격 포즈가 출력되지 않는다.
+공격 전용 State Machine은 현재 필요 없다. C++가 `AM_Knight`를 재생하며 AnimGraph의 `CombatGroup.UpperBody` Slot과 `Layered Blend Per Bone`이 Locomotion 위에 공격 상체를 합성한다. 전체 노드 연결과 Branch Filter 설정은 [[상하체 애니메이션 분리 및 Enemy Run 연결 절차]]를 따른다.
 
 ## 5. `AM_Knight` 3타 콤보 확인
 
@@ -117,10 +108,10 @@ Output Log에 `JumpToSectionName Attack_A ... failed for Montage AM_Knight`가 �
 Section 오류가 사라졌는데도 동작이 보이지 않으면, 재생된 Montage가 AnimBP 최종 포즈에 합성되지 않은 것이다. `ABP_Greystone` Anim Graph를 반드시 아래처럼 만든다.
 
 ```text
-Locomotion_BS → Slot (DefaultSlot) → Output Animation Pose
+Locomotion Cached Pose + Slot(UpperBody) → Layered Blend Per Bone → Slot(FullBody) → Output Animation Pose
 ```
 
-`Locomotion_BS → Output Animation Pose` 직결은 이동 포즈만 출력하므로, C++의 `PlayAnimMontage` 호출이 성공해도 공격 포즈는 화면에 나타나지 않는다. 이어서 `AM_Knight`의 Slot Track 이름과 AnimGraph `Slot Name`이 같은지 확인한다. 기본값이면 둘 다 `DefaultSlot`이다. Mesh의 Animation Mode도 `Use Animation Blueprint`, Anim Class도 `ABP_Greystone`이어야 한다.
+`Locomotion_BS → Output Animation Pose` 직결은 이동 포즈만 출력하므로, C++의 `PlayAnimMontage` 호출이 성공해도 공격 포즈는 화면에 나타나지 않는다. `AM_Knight`와 AnimGraph가 모두 `CombatGroup.UpperBody`인지 확인한다. Mesh의 Animation Mode도 `Use Animation Blueprint`, Anim Class도 `ABP_Greystone`이어야 한다.
 
 ## 6. Greystone 플레이어 Blueprint 설정
 

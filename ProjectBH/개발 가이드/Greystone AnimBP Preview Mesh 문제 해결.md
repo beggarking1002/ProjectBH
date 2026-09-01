@@ -34,8 +34,8 @@ Animation Blueprint는 생성될 때 특정 Skeleton에 묶인다. Preview Mesh 
 
 1. Locomotion State Machine 또는 기본 Pose를 만든다.
 2. 그 출력에 `Slot` 노드를 연결한다.
-3. `AM_Knight`의 Slot Name과 같은 Slot을 사용한다. 보통 기본값은 `DefaultSlot`이다.
-4. Slot 노드 출력을 Final Animation Pose에 연결한다.
+3. `AM_Knight`와 AnimGraph 모두 `CombatGroup.UpperBody`를 사용한다.
+4. [[상하체 애니메이션 분리 및 Enemy Run 연결 절차]]의 `Layered Blend Per Bone → FullBody Slot` 구조를 거쳐 Final Animation Pose에 연결한다.
 
 Slot이 없으면 이동 애니메이션은 보여도 Montage 공격이 보이지 않을 수 있다.
 
@@ -46,14 +46,14 @@ Slot이 없으면 이동 애니메이션은 보여도 Montage 공격이 보이�
 ```text
 Ground Speed 변수 ──> Locomotion_BS의 Ground Speed 축
 Direction 변수    ──> Locomotion_BS의 Direction 축
-Locomotion_BS 포즈 출력 ──> Slot(DefaultSlot) ──> Output Animation Pose
+Locomotion Cached Pose + Slot(UpperBody) → Layered Blend Per Bone → Slot(FullBody) → Output Animation Pose
 ```
 
 Blend Space 입력 핀에 `None`이라고 표시되는 것은 축 이름이 비어 있다는 뜻이다. `Locomotion_BS`를 열어 Asset Details의 Axis Settings에서 해당 축 이름을 `Ground Speed`로 바꾼다. 저장 후 Anim Graph로 돌아오면 `None` 핀이 `Ground Speed`로 바뀐다.
 
 초기 확인 단계에서는 `Direction`을 `0.0`으로 두고, `Ground Speed`만 연결해 전진·정지 이동을 먼저 확인해도 된다. 좌우·후진 이동을 지원할 때는 공용 C++ AnimInstance가 계산한 상속 `Direction` 변수를 연결한다.
 
-`Locomotion_BS`의 포즈 출력은 바로 Output Animation Pose에 연결할 수 있지만, `AM_Knight` Montage를 재생하려면 그 사이에 Montage와 같은 Slot Name(보통 `DefaultSlot`)의 `Slot` 노드를 넣는다.
+`Locomotion_BS`의 포즈 출력은 바로 Output Animation Pose에 연결할 수 있지만, 이동 공격을 재생하려면 Cached Pose와 `CombatGroup.UpperBody` Slot을 `Layered Blend Per Bone`으로 합성하고 마지막에 `CombatGroup.FullBody` Slot을 둔다.
 
 ## 좌우 게걸음(Strafe) 연결
 

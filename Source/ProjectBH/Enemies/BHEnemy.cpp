@@ -83,8 +83,45 @@ void ABHEnemy::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetime
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 
 	DOREPLIFETIME(ABHEnemy, CombatState);
+	DOREPLIFETIME(ABHEnemy, bHasJoinedFormation);
+	DOREPLIFETIME(ABHEnemy, bNeedsFormationCatchUp);
+	DOREPLIFETIME(ABHEnemy, bWantsRunLocomotion);
 	DOREPLIFETIME(ABHEnemy, bIsPoolInWorld);
 	DOREPLIFETIME(ABHEnemy, PoolManager);
+}
+
+void ABHEnemy::MarkFormationJoined()
+{
+	if (HasAuthority())
+	{
+		bHasJoinedFormation = true;
+	}
+}
+
+void ABHEnemy::ResetFormationJoinState()
+{
+	if (HasAuthority())
+	{
+		bHasJoinedFormation = false;
+		bNeedsFormationCatchUp = false;
+		bWantsRunLocomotion = false;
+	}
+}
+
+void ABHEnemy::SetFormationCatchUpRequired(bool bRequired)
+{
+	if (HasAuthority())
+	{
+		bNeedsFormationCatchUp = bRequired;
+	}
+}
+
+void ABHEnemy::SetWantsRunLocomotion(bool bWantsRun)
+{
+	if (HasAuthority())
+	{
+		bWantsRunLocomotion = bWantsRun;
+	}
 }
 
 bool ABHEnemy::IsPoolManaged() const
@@ -581,6 +618,7 @@ void ABHEnemy::DestroyCurrentAIController()
 void ABHEnemy::ResetGameplayStateForPoolActivation()
 {
 	ClearAttackContext();
+	ResetFormationJoinState();
 	bLoggedInvalidAttackConfig = false;
 	bHasAppliedDamageThisAttack = false;
 	SuccessfulAttackStartCount = 0;

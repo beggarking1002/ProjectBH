@@ -8,6 +8,11 @@ void UBHEnemyAnimInstance::NativeInitializeAnimation()
 {
 	Super::NativeInitializeAnimation();
 	OwningEnemy = Cast<ABHEnemy>(OwningCharacter);
+	if (OwningEnemy)
+	{
+		PreviousObservedLocation = OwningEnemy->GetActorLocation();
+		bHasPreviousObservedLocation = true;
+	}
 }
 
 void UBHEnemyAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
@@ -19,8 +24,34 @@ void UBHEnemyAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 	}
 
 	CombatState = OwningEnemy->GetCombatState();
+	bIsChasing = CombatState == EBHEnemyCombatState::Chasing;
+	bHasJoinedFormation = OwningEnemy->HasJoinedFormation();
+	bNeedsFormationCatchUp = OwningEnemy->NeedsFormationCatchUp();
+	bWantsRunLocomotion = OwningEnemy->WantsRunLocomotion();
 	bIsStaggered = CombatState == EBHEnemyCombatState::Staggered;
 	bIsDead = CombatState == EBHEnemyCombatState::Dead;
+
+	const FVector CurrentLocation = OwningEnemy->GetActorLocation();
+	if (!bHasPreviousObservedLocation
+		|| DeltaSeconds <= UE_SMALL_NUMBER
+		|| DeltaSeconds > 0.25f
+		|| FVector::DistSquared2D(CurrentLocation, PreviousObservedLocation)
+			> FMath::Square(FMath::Max(0.0f, ObservedTeleportDistance)))
+	{
+		PreviousObservedLocation = CurrentLocation;
+		bHasPreviousObservedLocation = true;
+		ObservedGroundSpeed = 0.0f;
+		return;
+	}
+
+	const float RawObservedSpeed = FVector::Dist2D(CurrentLocation, PreviousObservedLocation)
+		/ DeltaSeconds;
+	ObservedGroundSpeed = FMath::FInterpTo(
+		ObservedGroundSpeed,
+		RawObservedSpeed,
+		DeltaSeconds,
+		FMath::Max(0.0f, ObservedSpeedInterpRate));
+	PreviousObservedLocation = CurrentLocation;
 }
 
 void UBHEnemyAnimInstance::NativeThreadSafeUpdateAnimation(float DeltaSeconds)
@@ -30,6 +61,10 @@ void UBHEnemyAnimInstance::NativeThreadSafeUpdateAnimation(float DeltaSeconds)
 	{
 		return;
 	}
+	// Detour can report non-zero CharacterMovement velocity while avoidance keeps
+	// the actor in place. Enemy animation uses real translation so blocked agents
+	// settle to Idle instead of running on the spot.
+	GroundSpeed = ObservedGroundSpeed;
 
 	const float ExitSpeed = FMath::Max(0.0f, MoveExitSpeed);
 	const float EnterSpeed = FMath::Max(ExitSpeed, MoveEnterSpeed);
@@ -41,6 +76,9 @@ void UBHEnemyAnimInstance::NativeThreadSafeUpdateAnimation(float DeltaSeconds)
 	{
 		bShouldMove = GroundSpeed >= EnterSpeed;
 	}
+	bShouldUseRunLocomotion = bIsChasing
+		&& bShouldMove
+		&& bWantsRunLocomotion;
 
 	// Enemy ABPs currently use bHasAcceleration for Idle/Jog transitions.
 	// Preserve that wiring while giving it the stable speed-based meaning above.
