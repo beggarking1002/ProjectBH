@@ -411,6 +411,10 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Corridor Formation", meta = (ClampMin = "0", ClampMax = "32"))
 	int32 CorridorSideBalanceSearchExtraRows = 6;
 
+	/** Physical distance past the player axis required before an existing requester is considered to have changed Corridor sides. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Corridor Formation", meta = (ClampMin = "0.0", Units = "cm"))
+	float CorridorPhysicalSideOverrideDistance = 60.0f;
+
 	/** Maximum distance allowed between a dynamic row point and its NavMesh projection. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Corridor Formation", meta = (ClampMin = "0.0", Units = "cm"))
 	float CorridorRowProjectionTolerance = 35.0f;
@@ -644,13 +648,13 @@ private:
 	int32 GetLockedAttackReservationCount() const;
 	int32 GetCorridorLaneIndex(AActor* Requester) const;
 	int32 GetCorridorSideIndex(AActor* Requester) const;
+	bool IsCorridorAttackSlotOnRequesterSide(AActor* Requester, int32 AttackSlotIndex) const;
 	int32 GetCorridorQueueChannelIndex(AActor* Requester) const;
 	int32 GetCorridorAttackSlotSideIndex(int32 AttackSlotIndex) const;
 	int32 GetCorridorAttackSlotChannelIndex(int32 AttackSlotIndex) const;
 	void UpdateCorridorSideForAttackReservation(AActor* Requester, int32 AttackSlotIndex);
 	bool FindCorridorWaitAdmissionForAttackSlot(
 		int32 AttackSlotIndex,
-		bool bAllowOtherSide,
 		int32& OutWaitSlotIndex,
 		bool bRequireWaitArrival = true) const;
 	FVector ResolveCorridorRearDirection(const FVector& UnsignedAxis) const;
@@ -674,6 +678,10 @@ private:
 	int32 CalculatePocketAttackSlotCount() const;
 	bool GetCorridorSlotWorldLocation(EBHCombatSlotType SlotType, int32 SlotIndex, FVector& OutWorldLocation) const;
 	bool GetCorridorPendingWorldLocation(int32 PendingIndex, FVector& OutWorldLocation) const;
+	bool GetCorridorPendingWorldLocationForRequester(
+		AActor* Requester,
+		int32& OutPendingIndex,
+		FVector& OutWorldLocation) const;
 	bool GetPocketSlotWorldLocation(EBHCombatSlotType SlotType, int32 SlotIndex, FVector& OutWorldLocation) const;
 	bool GetPocketPendingWorldLocation(int32 PendingIndex, FVector& OutWorldLocation) const;
 	bool GetPocketFanWorldLocation(
