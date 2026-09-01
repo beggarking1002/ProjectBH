@@ -192,6 +192,10 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI|Recovery", meta = (ClampMin = "0.1", Units = "s"))
 	float RunNoProgressTimeout = 1.5f;
 
+	/** Attack owners must yield quickly even when their current gait is not Run. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI|Recovery", meta = (ClampMin = "0.1", Units = "s"))
+	float AttackNoProgressTimeout = 1.5f;
+
 	/** A recovering Attack owner farther than this from its slot yields immediately. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI|Recovery", meta = (ClampMin = "0.0", Units = "cm"))
 	float RecoveringAttackSlotLeashDistance = 60.0f;
@@ -242,6 +246,7 @@ private:
 	TWeakObjectPtr<AActor> CurrentSlotRequester;
 	FVector LastRequestedSlotLocation = FVector::ZeroVector;
 	bool bHasRequestedSlotMove = false;
+	bool bForceSlotPathRefresh = false;
 	EBHCombatMoveRouteStage CurrentMoveRouteStage = EBHCombatMoveRouteStage::Direct;
 	EBHCombatMoveRouteStage LastRequestedRouteStage = EBHCombatMoveRouteStage::Direct;
 	bool bEscapingCombatCore = false;

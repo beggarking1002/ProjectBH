@@ -89,7 +89,7 @@ public:
 	/** Releases every slot owned by Requester and optionally preserves its central queue priority. */
 	void ReleaseSlot(AActor* Requester, bool bPreserveQueuePosition = false);
 
-	/** Atomically demotes a stalled Attack owner and promotes the best arrived Wait candidate. */
+	/** Atomically demotes a stalled Attack owner and promotes the closest reachable Wait candidate. */
 	bool HandleStalledAttackReservation(AActor* Requester, float AttackReentryCooldown);
 
 	UFUNCTION(BlueprintPure, Category = "Combat|Engagement Slots")
@@ -471,6 +471,18 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Pocket Formation", meta = (ClampMin = "1.0", ClampMax = "90.0", Units = "deg"))
 	float PocketFormationRepathAngle = 15.0f;
 
+	/** Keeps aggressive owner reassignment active briefly after a Pocket relocation or turn. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Pocket Formation", meta = (ClampMin = "0.0", Units = "s"))
+	float PocketRapidReformDuration = 1.5f;
+
+	/** Smaller distance advantage accepted while rapidly rebuilding a Pocket encirclement. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Pocket Formation", meta = (ClampMin = "0.0", Units = "cm"))
+	float PocketRapidHandoverDistanceAdvantage = 25.0f;
+
+	/** Stable-candidate delay used during the Pocket rapid-reform window. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Pocket Formation", meta = (ClampMin = "0.0", Units = "s"))
+	float PocketRapidHandoverDelay = 0.1f;
+
 	/** A queued enemy must be this close to its current ring slot before central promotion. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Engagement Queue", meta = (ClampMin = "0.0", Units = "cm"))
 	float PromotionArrivalRadius = 60.0f;
@@ -494,6 +506,33 @@ protected:
 	/** Blocks another exchange on the same Attack slot and the demoted owner for this long. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Engagement Handover", meta = (ClampMin = "0.0", Units = "s"))
 	float AttackHandoverCooldown = 0.75f;
+
+	/** Enables a forced exchange when a non-Attack enemy is trapped between the player and an Attack owner. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Core Intrusion Handover")
+	bool bEnableCoreIntrusionHandover = true;
+
+	/** Maximum lateral distance from the player-to-Attack-owner segment. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Core Intrusion Handover", meta = (ClampMin = "0.0", Units = "cm"))
+	float CoreIntrusionCorridorRadius = 70.0f;
+
+	/** Keeps candidates away from both segment endpoints to avoid incidental overlap. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Core Intrusion Handover", meta = (ClampMin = "0.0", Units = "cm"))
+	float CoreIntrusionEndpointPadding = 20.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Core Intrusion Handover", meta = (ClampMin = "0.0", Units = "cm"))
+	float CoreIntrusionHeightTolerance = 100.0f;
+
+	/** Candidate must remain inside the corridor without meaningful displacement for this long. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Core Intrusion Handover", meta = (ClampMin = "0.0", Units = "s"))
+	float CoreIntrusionStableTime = 0.35f;
+
+	/** Movement beyond this distance restarts the stable-time test. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Core Intrusion Handover", meta = (ClampMin = "0.0", Units = "cm"))
+	float CoreIntrusionProgressDistance = 20.0f;
+
+	/** Prevents immediate reverse exchange after one forced retreat. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Core Intrusion Handover", meta = (ClampMin = "0.0", Units = "s"))
+	float CoreIntrusionHandoverCooldown = 1.0f;
 
 	/** Initial arrivals wait provisionally, then receive a congestion-aware formation after this quiet period. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Engagement Queue", meta = (ClampMin = "0.0", Units = "s"))
@@ -649,10 +688,28 @@ private:
 	void RefreshInitialFormationPhase();
 	void UpdateAttackVacancyTimers(float DeltaTime);
 	void RefreshFastAttackHandovers(float DeltaTime);
+	void ActivatePocketRapidReform();
+	bool IsPocketRapidReformActive() const;
+	void RefreshCoreIntrusionHandover(float DeltaTime);
+	bool FindClosestCoreIntrusionPair(
+		int32& OutAttackSlotIndex,
+		AActor*& OutAttackOwner,
+		AActor*& OutIntruder) const;
+	bool ExecuteCoreIntrusionHandover(
+		int32 AttackSlotIndex,
+		AActor* AttackOwner,
+		AActor* Intruder);
+	void ResetCoreIntrusionHandoverTracking();
 	bool FindFastAttackHandoverCandidate(
 		int32 AttackSlotIndex,
 		AActor* CurrentAttackOwner,
 		int32& OutWaitSlotIndex) const;
+	bool ExecuteAttackWaitHandover(
+		int32 AttackSlotIndex,
+		int32 WaitSlotIndex,
+		AActor* CurrentAttackOwner,
+		AActor* Candidate,
+		float Cooldown);
 	void ResetAttackHandoverTracking(int32 AttackSlotIndex);
 	void FinalizeInitialFormationAssignments();
 	void NotifyRequesterSlotChanged(AActor* Requester) const;
@@ -674,7 +731,8 @@ private:
 		bool bAllowUnarrivedWait = false) const;
 	bool FindBestWaitAdmissionForAttackSlot(
 		int32 AttackSlotIndex,
-		int32& OutWaitSlotIndex) const;
+		int32& OutWaitSlotIndex,
+		bool bAllowUnarrivedWait = false) const;
 	bool FindBestInitialAttackAssignment(
 		AActor*& OutRequester,
 		int32& OutAttackSlotIndex) const;
@@ -704,6 +762,9 @@ private:
 	bool ShouldUseCombatCoreEscape(
 		AActor* Requester,
 		EBHCombatMoveRouteStage PreviousRouteStage) const;
+	bool CanUseDirectAttackCoreExit(
+		AActor* Requester,
+		const FVector& AttackSlotLocation) const;
 	bool ResolveCombatCoreEscapeGoal(
 		AActor* Requester,
 		FVector& OutMoveGoal,
@@ -735,6 +796,13 @@ private:
 	TArray<float> AttackHandoverBlockedUntil;
 	TArray<TWeakObjectPtr<AActor>> WaitReservations;
 	TArray<TWeakObjectPtr<AActor>> HoldingReservations;
+	TWeakObjectPtr<AActor> TrackedCoreIntrusionOwner;
+	TWeakObjectPtr<AActor> TrackedCoreIntruder;
+	int32 TrackedCoreIntrusionAttackSlot = INDEX_NONE;
+	FVector CoreIntrusionAnchorLocation = FVector::ZeroVector;
+	float CoreIntrusionStableElapsed = 0.0f;
+	float CoreIntrusionBlockedUntil = 0.0f;
+	float PocketRapidReformUntil = 0.0f;
 
 	struct FEngagementQueueEntry
 	{

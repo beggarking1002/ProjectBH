@@ -166,9 +166,16 @@ void ABHCrowdEnemyAIController::OnMoveCompleted(FAIRequestID RequestID, const FP
 		UE_LOG(
 			LogProjectBH,
 			Warning,
-			TEXT("%s could not reach its reserved combat slot; releasing the reservation."),
+			TEXT("%s could not reach its reserved combat slot; attempting slot recovery."),
 			*GetName());
-		ReleaseCurrentCombatSlot(EBHCombatSlotReleaseReason::PathFollowingFailed, true);
+		if (CurrentSlotType == EBHCombatSlotType::Attack)
+		{
+			RecoverStalledCombatSlot(Cast<ABHEnemy>(GetPawn()));
+		}
+		else
+		{
+			ReleaseCurrentCombatSlot(EBHCombatSlotReleaseReason::PathFollowingFailed, true);
+		}
 	}
 }
 
@@ -199,10 +206,10 @@ void ABHCrowdEnemyAIController::NotifyCombatSlotAssignmentChanged()
 void ABHCrowdEnemyAIController::RefreshAfterCombatSlotAssignmentChanged()
 {
 	bSlotAssignmentRefreshQueued = false;
-	bHasRequestedSlotMove = false;
-	CurrentMoveRouteStage = EBHCombatMoveRouteStage::Direct;
-	LastRequestedRouteStage = EBHCombatMoveRouteStage::Direct;
-	ResetStuckTracking();
+	// A formation revision often only nudges the same reserved destination. Force
+	// an immediate repath without erasing no-progress evidence. AcquireCombatSlot
+	// still resets tracking when the actual slot type or index changes.
+	bForceSlotPathRefresh = true;
 	RefreshTargetAndMove();
 }
 
@@ -497,7 +504,11 @@ void ABHCrowdEnemyAIController::RefreshTargetAndMove()
 	const bool bRouteStageChanged = CurrentMoveRouteStage != LastRequestedRouteStage;
 	const bool bSlotMoved = !bHasRequestedSlotMove
 		|| FVector::DistSquared2D(LastRequestedSlotLocation, MoveGoal) >= FMath::Square(GetCurrentSlotRepathDistance());
-	if (bTargetChanged || bRouteStageChanged || bSlotMoved || GetMoveStatus() != EPathFollowingStatus::Moving)
+	if (bTargetChanged
+		|| bForceSlotPathRefresh
+		|| bRouteStageChanged
+		|| bSlotMoved
+		|| GetMoveStatus() != EPathFollowingStatus::Moving)
 	{
 		const bool bUsesRingWaypoint = CurrentMoveRouteStage == EBHCombatMoveRouteStage::ApproachRing
 			|| CurrentMoveRouteStage == EBHCombatMoveRouteStage::AlignOnRing
@@ -630,12 +641,9 @@ bool ABHCrowdEnemyAIController::AcquireCombatSlot(ABHEnemy* ControlledEnemy)
 		LastObservedFormationRevision = CurrentSlotComponent->GetFormationRevision();
 		++ReformCount;
 		bIsReforming = true;
-		// A reform changes the destination, not the movement state. Keep current
-		// velocity and replace the path in this refresh instead of stopping first.
-		bHasRequestedSlotMove = false;
-		CurrentMoveRouteStage = EBHCombatMoveRouteStage::Direct;
-		LastRequestedRouteStage = EBHCombatMoveRouteStage::Direct;
-		ResetStuckTracking();
+		// Preserve watchdog history for the same logical reservation. The concrete
+		// Move Goal comparison resets it later only if the destination truly moved.
+		bForceSlotPathRefresh = true;
 	}
 
 	const bool bHasActiveExclusion = GetWorld()
@@ -668,6 +676,7 @@ bool ABHCrowdEnemyAIController::AcquireCombatSlot(ABHEnemy* ControlledEnemy)
 		&& (TrackedSlotType != CurrentSlotType || TrackedSlotIndex != CurrentSlotIndex))
 	{
 		bHasRequestedSlotMove = false;
+		bForceSlotPathRefresh = false;
 		CurrentMoveRouteStage = EBHCombatMoveRouteStage::Direct;
 		LastRequestedRouteStage = EBHCombatMoveRouteStage::Direct;
 		ResetStuckTracking();
@@ -921,6 +930,7 @@ void ABHCrowdEnemyAIController::ReleaseCurrentCombatSlot(
 	bEscapingCombatCore = false;
 	LastRequestedSlotLocation = FVector::ZeroVector;
 	bHasRequestedSlotMove = false;
+	bForceSlotPathRefresh = false;
 	TrackedSlotType = EBHCombatSlotType::None;
 	TrackedSlotIndex = INDEX_NONE;
 	ResetStuckTracking();
@@ -993,6 +1003,7 @@ void ABHCrowdEnemyAIController::RequestMoveToReservedSlot(
 	const FVector& SlotLocation,
 	float AcceptanceRadius)
 {
+	bForceSlotPathRefresh = false;
 	const bool bMoveGoalChanged = !bHasRequestedSlotMove
 		|| CurrentMoveRouteStage != LastRequestedRouteStage
 		|| FVector::DistSquared2D(LastRequestedSlotLocation, SlotLocation)
@@ -1027,7 +1038,14 @@ void ABHCrowdEnemyAIController::RequestMoveToReservedSlot(
 			TEXT("%s failed to find a NavMesh path to its reserved combat slot for %s."),
 			*GetName(),
 			IsValid(CurrentTarget) ? *CurrentTarget->GetName() : TEXT("invalid target"));
-		ReleaseCurrentCombatSlot(EBHCombatSlotReleaseReason::MoveRequestFailed, true);
+		if (CurrentSlotType == EBHCombatSlotType::Attack)
+		{
+			RecoverStalledCombatSlot(Cast<ABHEnemy>(GetPawn()));
+		}
+		else
+		{
+			ReleaseCurrentCombatSlot(EBHCombatSlotReleaseReason::MoveRequestFailed, true);
+		}
 		return;
 	}
 
@@ -1070,10 +1088,11 @@ bool ABHCrowdEnemyAIController::UpdateStuckTracking(float DistanceToSlot, float 
 	}
 
 	const ABHEnemy* ControlledEnemy = Cast<ABHEnemy>(GetPawn());
-	const float EffectiveNoProgressTimeout = ControlledEnemy
-		&& ControlledEnemy->WantsRunLocomotion()
-		? RunNoProgressTimeout
-		: NoProgressTimeout;
+	const float EffectiveNoProgressTimeout = CurrentSlotType == EBHCombatSlotType::Attack
+		? AttackNoProgressTimeout
+		: (ControlledEnemy && ControlledEnemy->WantsRunLocomotion()
+			? RunNoProgressTimeout
+			: NoProgressTimeout);
 	return StuckElapsed >= StuckTimeout
 		|| NoProgressElapsed >= FMath::Max(0.1f, EffectiveNoProgressTimeout);
 }

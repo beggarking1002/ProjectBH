@@ -39,6 +39,7 @@ void UCombatEngagementSlotComponent::EndPlay(const EEndPlayReason::Type EndPlayR
 	AttackHandoverBlockedUntil.Reset();
 	WaitReservations.Reset();
 	HoldingReservations.Reset();
+	ResetCoreIntrusionHandoverTracking();
 	EngagementQueue.Reset();
 	SpaceProbeEndpoints.Reset();
 	SpaceProbeBlocked.Reset();
@@ -65,6 +66,7 @@ void UCombatEngagementSlotComponent::TickComponent(float DeltaTime, ELevelTick T
 	UpdateAttackVacancyTimers(DeltaTime);
 	if (!IsInitialFormationActive())
 	{
+		RefreshCoreIntrusionHandover(DeltaTime);
 		RefreshPromotions();
 		RefreshFastAttackHandovers(DeltaTime);
 	}
@@ -816,6 +818,9 @@ void UCombatEngagementSlotComponent::HandleCombatSpaceModeChanged(EBHCombatSpace
 				TEXT("%s kept its previous Pocket Attack reservations because the new active row could not be projected."),
 				GetOwner() ? *GetOwner()->GetName() : TEXT("InvalidSlotOwner"));
 		}
+		ActivatePocketRapidReform();
+		ReformRingReservations(WaitReservations, EBHCombatSlotType::Wait);
+		ReformRingReservations(HoldingReservations, EBHCombatSlotType::Holding);
 	}
 	else
 	{
@@ -930,6 +935,9 @@ void UCombatEngagementSlotComponent::UpdatePocketFormationDirection()
 		<= NotifyDotThreshold)
 	{
 		LastNotifiedPocketDirection = PocketFormationDirection;
+		ActivatePocketRapidReform();
+		ReformRingReservations(WaitReservations, EBHCombatSlotType::Wait);
+		ReformRingReservations(HoldingReservations, EBHCombatSlotType::Holding);
 		++FormationRevision;
 		NotifyAllReservedRequestersSlotChanged();
 	}
@@ -3052,6 +3060,14 @@ bool UCombatEngagementSlotComponent::GetMoveGoalForReservedSlot(
 		return false;
 	}
 	const FVector RequesterLocation = Requester->GetActorLocation();
+	if (SlotType == EBHCombatSlotType::Attack
+		&& CanUseDirectAttackCoreExit(Requester, FinalSlotLocation))
+	{
+		// A core intruder promoted into the vacated radial Attack slot already has
+		// a clear outward destination. Sending it to the full escape ring first
+		// would overshoot the handed-over slot and recreate the blockage.
+		return true;
+	}
 	if (ShouldUseCombatCoreEscape(Requester, PreviousRouteStage))
 	{
 		return ResolveCombatCoreEscapeGoal(
@@ -3309,7 +3325,7 @@ bool UCombatEngagementSlotComponent::HandleStalledAttackReservation(
 	}
 
 	int32 WaitSlotIndex = INDEX_NONE;
-	if (!FindBestWaitAdmissionForAttackSlot(AttackSlotIndex, WaitSlotIndex))
+	if (!FindBestWaitAdmissionForAttackSlot(AttackSlotIndex, WaitSlotIndex, true))
 	{
 		return false;
 	}
@@ -3320,29 +3336,20 @@ bool UCombatEngagementSlotComponent::HandleStalledAttackReservation(
 		return false;
 	}
 
-	// Swap both reservations in one server tick so neither ring exposes a
-	// transient vacancy and the demoted actor keeps its original queue entry.
-	AttackReservations[AttackSlotIndex] = PromotedRequester;
-	WaitReservations[WaitSlotIndex] = Requester;
-	UpdateCorridorSideForAttackReservation(PromotedRequester, AttackSlotIndex);
-	const float CurrentTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
-	SetAttackEligibleTime(
+	if (!ExecuteAttackWaitHandover(
+		AttackSlotIndex,
+		WaitSlotIndex,
 		Requester,
-		CurrentTime + FMath::Max(0.0f, AttackReentryCooldown));
-	if (IsCorridorFormationActive())
+		PromotedRequester,
+		AttackReentryCooldown))
 	{
-		RepackCorridorLayerReservations(
-			WaitReservations,
-			EBHCombatSlotType::Wait,
-			true);
-		NotifyRequesterSlotChanged(PromotedRequester);
-		NotifyRequesterSlotChanged(Requester);
+		return false;
 	}
 
 	UE_LOG(
 		LogProjectBH,
 		Display,
-		TEXT("%s swapped stalled Attack owner %s with ready Wait candidate %s."),
+		TEXT("%s swapped stalled Attack owner %s with reachable Wait candidate %s."),
 		GetOwner() ? *GetOwner()->GetName() : TEXT("InvalidSlotOwner"),
 		*Requester->GetName(),
 		*PromotedRequester->GetName());
@@ -3532,6 +3539,245 @@ void UCombatEngagementSlotComponent::ResetAttackHandoverTracking(int32 AttackSlo
 	}
 }
 
+void UCombatEngagementSlotComponent::ResetCoreIntrusionHandoverTracking()
+{
+	TrackedCoreIntrusionOwner.Reset();
+	TrackedCoreIntruder.Reset();
+	TrackedCoreIntrusionAttackSlot = INDEX_NONE;
+	CoreIntrusionAnchorLocation = FVector::ZeroVector;
+	CoreIntrusionStableElapsed = 0.0f;
+}
+
+bool UCombatEngagementSlotComponent::FindClosestCoreIntrusionPair(
+	int32& OutAttackSlotIndex,
+	AActor*& OutAttackOwner,
+	AActor*& OutIntruder) const
+{
+	OutAttackSlotIndex = INDEX_NONE;
+	OutAttackOwner = nullptr;
+	OutIntruder = nullptr;
+	const AActor* Owner = GetOwner();
+	if (!bEnableCoreIntrusionHandover || !Owner)
+	{
+		return false;
+	}
+
+	const FVector OwnerLocation = Owner->GetActorLocation();
+	const float CorridorRadiusSquared = FMath::Square(
+		FMath::Max(0.0f, CoreIntrusionCorridorRadius));
+	const float EndpointPadding = FMath::Max(0.0f, CoreIntrusionEndpointPadding);
+	const float HeightTolerance = FMath::Max(0.0f, CoreIntrusionHeightTolerance);
+	const float CurrentTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
+	float BestOwnerDistanceSquared = TNumericLimits<float>::Max();
+	const int32 ActiveAttackCount = GetActiveAttackSlotCount();
+
+	for (int32 AttackSlotIndex = 0;
+		AttackSlotIndex < ActiveAttackCount && AttackReservations.IsValidIndex(AttackSlotIndex);
+		++AttackSlotIndex)
+	{
+		AActor* AttackOwner = AttackReservations[AttackSlotIndex].Get();
+		const ABHEnemy* AttackEnemy = Cast<ABHEnemy>(AttackOwner);
+		if (!AttackEnemy || AttackEnemy->GetCombatState() != EBHEnemyCombatState::Chasing)
+		{
+			continue;
+		}
+
+		const FVector AttackOwnerLocation = AttackOwner->GetActorLocation();
+		const FVector2D Segment = FVector2D(AttackOwnerLocation - OwnerLocation);
+		const float SegmentLengthSquared = Segment.SizeSquared();
+		const float SegmentLength = FMath::Sqrt(SegmentLengthSquared);
+		if (SegmentLengthSquared <= UE_KINDA_SMALL_NUMBER
+			|| SegmentLength <= EndpointPadding * 2.0f)
+		{
+			continue;
+		}
+
+		const float MinimumAlpha = EndpointPadding / SegmentLength;
+		for (const FEngagementQueueEntry& Entry : EngagementQueue)
+		{
+			AActor* Intruder = Entry.Requester.Get();
+			const ABHEnemy* IntruderEnemy = Cast<ABHEnemy>(Intruder);
+			int32 ExistingAttackSlot = INDEX_NONE;
+			if (!IntruderEnemy
+				|| Intruder == AttackOwner
+				|| IntruderEnemy->GetCombatState() != EBHEnemyCombatState::Chasing
+				|| CurrentTime < Entry.AttackEligibleTime
+				|| FindReservation(AttackReservations, Intruder, ExistingAttackSlot))
+			{
+				continue;
+			}
+
+			const FVector IntruderLocation = Intruder->GetActorLocation();
+			if (FMath::Abs(IntruderLocation.Z - AttackOwnerLocation.Z) > HeightTolerance)
+			{
+				continue;
+			}
+
+			const FVector2D ToIntruder = FVector2D(IntruderLocation - OwnerLocation);
+			const float Alpha = FVector2D::DotProduct(ToIntruder, Segment)
+				/ SegmentLengthSquared;
+			if (Alpha <= MinimumAlpha || Alpha >= 1.0f - MinimumAlpha)
+			{
+				continue;
+			}
+
+			const FVector2D ClosestPoint = FVector2D(OwnerLocation) + Segment * Alpha;
+			if (FVector2D::DistSquared(FVector2D(IntruderLocation), ClosestPoint)
+				> CorridorRadiusSquared)
+			{
+				continue;
+			}
+
+			const float OwnerDistanceSquared = FVector::DistSquared2D(
+				IntruderLocation,
+				AttackOwnerLocation);
+			if (OwnerDistanceSquared < BestOwnerDistanceSquared)
+			{
+				BestOwnerDistanceSquared = OwnerDistanceSquared;
+				OutAttackSlotIndex = AttackSlotIndex;
+				OutAttackOwner = AttackOwner;
+				OutIntruder = Intruder;
+			}
+		}
+	}
+
+	return OutAttackSlotIndex != INDEX_NONE && OutAttackOwner && OutIntruder;
+}
+
+bool UCombatEngagementSlotComponent::ExecuteCoreIntrusionHandover(
+	int32 AttackSlotIndex,
+	AActor* AttackOwner,
+	AActor* Intruder)
+{
+	if (!AttackReservations.IsValidIndex(AttackSlotIndex)
+		|| AttackReservations[AttackSlotIndex].Get() != AttackOwner
+		|| !AttackOwner
+		|| !Intruder)
+	{
+		return false;
+	}
+
+	int32 IntruderLayerIndex = INDEX_NONE;
+	const bool bIntruderWasWait = FindReservation(
+		WaitReservations,
+		Intruder,
+		IntruderLayerIndex);
+	const bool bIntruderWasHolding = !bIntruderWasWait
+		&& FindReservation(HoldingReservations, Intruder, IntruderLayerIndex);
+	if (!bIntruderWasWait && !bIntruderWasHolding)
+	{
+		int32 PendingIndex = INDEX_NONE;
+		if (!FindPendingRequesterIndex(Intruder, PendingIndex))
+		{
+			return false;
+		}
+	}
+
+	AttackReservations[AttackSlotIndex] = Intruder;
+	if (bIntruderWasWait && WaitReservations.IsValidIndex(IntruderLayerIndex))
+	{
+		WaitReservations[IntruderLayerIndex] = AttackOwner;
+	}
+	else if (bIntruderWasHolding && HoldingReservations.IsValidIndex(IntruderLayerIndex))
+	{
+		HoldingReservations[IntruderLayerIndex] = AttackOwner;
+	}
+	// A Pending intruder owns no ring reservation. Its queue registration moves
+	// to Attack, while the former owner becomes Pending without losing sequence.
+
+	UpdateCorridorSideForAttackReservation(Intruder, AttackSlotIndex);
+	const float CurrentTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
+	const float Cooldown = FMath::Max(0.0f, CoreIntrusionHandoverCooldown);
+	SetAttackEligibleTime(AttackOwner, CurrentTime + Cooldown);
+	if (AttackHandoverBlockedUntil.IsValidIndex(AttackSlotIndex))
+	{
+		AttackHandoverBlockedUntil[AttackSlotIndex] = CurrentTime + Cooldown;
+	}
+	ResetAttackHandoverTracking(AttackSlotIndex);
+
+	NotifyRequesterSlotChanged(Intruder);
+	NotifyRequesterSlotChanged(AttackOwner);
+	UE_LOG(
+		LogProjectBH,
+		Display,
+		TEXT("%s yielded Attack slot %d from %s to core intruder %s."),
+		GetOwner() ? *GetOwner()->GetName() : TEXT("InvalidSlotOwner"),
+		AttackSlotIndex,
+		*AttackOwner->GetName(),
+		*Intruder->GetName());
+	return true;
+}
+
+void UCombatEngagementSlotComponent::ActivatePocketRapidReform()
+{
+	if (!IsPocketFormationActive() || !GetWorld())
+	{
+		return;
+	}
+	PocketRapidReformUntil = FMath::Max(
+		PocketRapidReformUntil,
+		GetWorld()->GetTimeSeconds() + FMath::Max(0.0f, PocketRapidReformDuration));
+}
+
+bool UCombatEngagementSlotComponent::IsPocketRapidReformActive() const
+{
+	return IsPocketFormationActive()
+		&& GetWorld()
+		&& GetWorld()->GetTimeSeconds() < PocketRapidReformUntil;
+}
+
+void UCombatEngagementSlotComponent::RefreshCoreIntrusionHandover(float DeltaTime)
+{
+	const float CurrentTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
+	if (!bEnableCoreIntrusionHandover || CurrentTime < CoreIntrusionBlockedUntil)
+	{
+		ResetCoreIntrusionHandoverTracking();
+		return;
+	}
+
+	int32 AttackSlotIndex = INDEX_NONE;
+	AActor* AttackOwner = nullptr;
+	AActor* Intruder = nullptr;
+	if (!FindClosestCoreIntrusionPair(AttackSlotIndex, AttackOwner, Intruder))
+	{
+		ResetCoreIntrusionHandoverTracking();
+		return;
+	}
+
+	if (TrackedCoreIntrusionAttackSlot != AttackSlotIndex
+		|| TrackedCoreIntrusionOwner.Get() != AttackOwner
+		|| TrackedCoreIntruder.Get() != Intruder)
+	{
+		TrackedCoreIntrusionAttackSlot = AttackSlotIndex;
+		TrackedCoreIntrusionOwner = AttackOwner;
+		TrackedCoreIntruder = Intruder;
+		CoreIntrusionAnchorLocation = Intruder->GetActorLocation();
+		CoreIntrusionStableElapsed = 0.0f;
+		return;
+	}
+
+	if (FVector::DistSquared2D(Intruder->GetActorLocation(), CoreIntrusionAnchorLocation)
+		> FMath::Square(FMath::Max(0.0f, CoreIntrusionProgressDistance)))
+	{
+		CoreIntrusionAnchorLocation = Intruder->GetActorLocation();
+		CoreIntrusionStableElapsed = 0.0f;
+		return;
+	}
+
+	CoreIntrusionStableElapsed += FMath::Max(0.0f, DeltaTime);
+	if (CoreIntrusionStableElapsed < FMath::Max(0.0f, CoreIntrusionStableTime))
+	{
+		return;
+	}
+
+	if (ExecuteCoreIntrusionHandover(AttackSlotIndex, AttackOwner, Intruder))
+	{
+		CoreIntrusionBlockedUntil = CurrentTime
+			+ FMath::Max(0.0f, CoreIntrusionHandoverCooldown);
+	}
+	ResetCoreIntrusionHandoverTracking();
+}
+
 bool UCombatEngagementSlotComponent::FindFastAttackHandoverCandidate(
 	int32 AttackSlotIndex,
 	AActor* CurrentAttackOwner,
@@ -3564,7 +3810,11 @@ bool UCombatEngagementSlotComponent::FindFastAttackHandoverCandidate(
 		return false;
 	}
 
-	const float RequiredAdvantage = FMath::Max(0.0f, AttackHandoverDistanceAdvantage);
+	const float RequiredAdvantage = FMath::Max(
+		0.0f,
+		IsPocketRapidReformActive()
+			? PocketRapidHandoverDistanceAdvantage
+			: AttackHandoverDistanceAdvantage);
 	const float CurrentTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
 	const bool bUsesCorridorSidePreference = IsCorridorFormationActive();
 	const int32 TargetSideIndex = bUsesCorridorSidePreference
@@ -3634,6 +3884,82 @@ bool UCombatEngagementSlotComponent::FindFastAttackHandoverCandidate(
 	return false;
 }
 
+bool UCombatEngagementSlotComponent::ExecuteAttackWaitHandover(
+	int32 AttackSlotIndex,
+	int32 WaitSlotIndex,
+	AActor* CurrentAttackOwner,
+	AActor* Candidate,
+	float Cooldown)
+{
+	if (!AttackReservations.IsValidIndex(AttackSlotIndex)
+		|| !WaitReservations.IsValidIndex(WaitSlotIndex)
+		|| AttackReservations[AttackSlotIndex].Get() != CurrentAttackOwner
+		|| WaitReservations[WaitSlotIndex].Get() != Candidate
+		|| !CurrentAttackOwner
+		|| !Candidate)
+	{
+		return false;
+	}
+
+	FVector AttackSlotLocation;
+	FVector FormerWaitSlotLocation;
+	float CandidatePathScore = 0.0f;
+	float FormerOwnerPathScore = 0.0f;
+	if (!GetSlotWorldLocation(
+		EBHCombatSlotType::Attack,
+		AttackSlotIndex,
+		AttackSlotLocation)
+		|| !GetSlotWorldLocation(
+			EBHCombatSlotType::Wait,
+			WaitSlotIndex,
+			FormerWaitSlotLocation)
+		|| !GetNavigationPathScore(Candidate, AttackSlotLocation, CandidatePathScore))
+	{
+		return false;
+	}
+
+	const bool bFormerOwnerCanReachWait = GetNavigationPathScore(
+		CurrentAttackOwner,
+		FormerWaitSlotLocation,
+		FormerOwnerPathScore);
+	AttackReservations[AttackSlotIndex] = Candidate;
+	WaitReservations[WaitSlotIndex] = bFormerOwnerCanReachWait
+		? CurrentAttackOwner
+		: nullptr;
+	UpdateCorridorSideForAttackReservation(Candidate, AttackSlotIndex);
+
+	const float CurrentTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
+	const float SafeCooldown = FMath::Max(0.0f, Cooldown);
+	SetAttackEligibleTime(CurrentAttackOwner, CurrentTime + SafeCooldown);
+	if (AttackHandoverBlockedUntil.IsValidIndex(AttackSlotIndex))
+	{
+		AttackHandoverBlockedUntil[AttackSlotIndex] = CurrentTime + SafeCooldown;
+	}
+	ResetAttackHandoverTracking(AttackSlotIndex);
+
+	if (IsCorridorFormationActive())
+	{
+		RepackCorridorLayerReservations(
+			WaitReservations,
+			EBHCombatSlotType::Wait,
+			true);
+	}
+	NotifyRequesterSlotChanged(Candidate);
+	NotifyRequesterSlotChanged(CurrentAttackOwner);
+	if (!bFormerOwnerCanReachWait)
+	{
+		UE_LOG(
+			LogProjectBH,
+			Display,
+			TEXT("%s demoted unreachable Attack owner %s to Pending after handing slot %d to %s."),
+			GetOwner() ? *GetOwner()->GetName() : TEXT("InvalidSlotOwner"),
+			*CurrentAttackOwner->GetName(),
+			AttackSlotIndex,
+			*Candidate->GetName());
+	}
+	return true;
+}
+
 void UCombatEngagementSlotComponent::RefreshFastAttackHandovers(float DeltaTime)
 {
 	if (AttackHandoverCandidates.Num() != AttackReservations.Num()
@@ -3648,8 +3974,9 @@ void UCombatEngagementSlotComponent::RefreshFastAttackHandovers(float DeltaTime)
 	const int32 ActiveAttackSlotCount = GetActiveAttackSlotCount();
 	const float CurrentTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
 	const float SafeDeltaTime = FMath::Max(0.0f, DeltaTime);
-	const bool bHandoverGloballyBlocked = IsInitialFormationActive()
-		|| HasActiveCombatCoreEscape();
+	// CoreEscape is requester-local. One enemy escaping the player core must not
+	// freeze unrelated Attack handovers on the opposite side of the formation.
+	const bool bHandoverGloballyBlocked = IsInitialFormationActive();
 
 	for (int32 AttackSlotIndex = 0;
 		AttackSlotIndex < AttackReservations.Num();
@@ -3693,47 +4020,51 @@ void UCombatEngagementSlotComponent::RefreshFastAttackHandovers(float DeltaTime)
 		}
 
 		AttackHandoverElapsed[AttackSlotIndex] += SafeDeltaTime;
+		const float RequiredDelay = IsPocketRapidReformActive()
+			? PocketRapidHandoverDelay
+			: AttackHandoverDelay;
 		if (AttackHandoverElapsed[AttackSlotIndex]
-			< FMath::Max(0.0f, AttackHandoverDelay))
+			< FMath::Max(0.0f, RequiredDelay))
 		{
 			continue;
 		}
 
 		FVector AttackSlotLocation;
-		FVector FormerWaitSlotLocation;
 		float CandidatePathScore = 0.0f;
-		float FormerOwnerPathScore = 0.0f;
 		if (!GetSlotWorldLocation(
 			EBHCombatSlotType::Attack,
 			AttackSlotIndex,
 			AttackSlotLocation)
-			|| !GetSlotWorldLocation(
-				EBHCombatSlotType::Wait,
-				WaitSlotIndex,
-				FormerWaitSlotLocation)
-			|| !GetNavigationPathScore(Candidate, AttackSlotLocation, CandidatePathScore)
-			|| !GetNavigationPathScore(
-				CurrentAttackOwner,
-				FormerWaitSlotLocation,
-				FormerOwnerPathScore))
+			|| !GetNavigationPathScore(Candidate, AttackSlotLocation, CandidatePathScore))
+		{
+			int32 ReachableWaitSlotIndex = INDEX_NONE;
+			if (!FindBestWaitAdmissionForAttackSlot(
+				AttackSlotIndex,
+				ReachableWaitSlotIndex,
+				true))
+			{
+				AttackHandoverBlockedUntil[AttackSlotIndex] = CurrentTime + 0.25f;
+				ResetAttackHandoverTracking(AttackSlotIndex);
+				continue;
+			}
+			WaitSlotIndex = ReachableWaitSlotIndex;
+			Candidate = WaitReservations.IsValidIndex(WaitSlotIndex)
+				? WaitReservations[WaitSlotIndex].Get()
+				: nullptr;
+		}
+
+		const float Cooldown = FMath::Max(0.0f, AttackHandoverCooldown);
+		if (!ExecuteAttackWaitHandover(
+			AttackSlotIndex,
+			WaitSlotIndex,
+			CurrentAttackOwner,
+			Candidate,
+			Cooldown))
 		{
 			AttackHandoverBlockedUntil[AttackSlotIndex] = CurrentTime + 0.25f;
 			ResetAttackHandoverTracking(AttackSlotIndex);
 			continue;
 		}
-
-		// Exchange both reservations in one server tick. The former Attack owner
-		// inherits the candidate's Wait slot, so no layer exposes a transient hole.
-		AttackReservations[AttackSlotIndex] = Candidate;
-		WaitReservations[WaitSlotIndex] = CurrentAttackOwner;
-		UpdateCorridorSideForAttackReservation(Candidate, AttackSlotIndex);
-		const float Cooldown = FMath::Max(0.0f, AttackHandoverCooldown);
-		SetAttackEligibleTime(CurrentAttackOwner, CurrentTime + Cooldown);
-		AttackHandoverBlockedUntil[AttackSlotIndex] = CurrentTime + Cooldown;
-		ResetAttackHandoverTracking(AttackSlotIndex);
-
-		NotifyRequesterSlotChanged(Candidate);
-		NotifyRequesterSlotChanged(CurrentAttackOwner);
 
 		UE_LOG(
 			LogProjectBH,
@@ -4127,7 +4458,8 @@ bool UCombatEngagementSlotComponent::FindBestWaitAdmission(
 
 bool UCombatEngagementSlotComponent::FindBestWaitAdmissionForAttackSlot(
 	int32 AttackSlotIndex,
-	int32& OutWaitSlotIndex) const
+	int32& OutWaitSlotIndex,
+	bool bAllowUnarrivedWait) const
 {
 	OutWaitSlotIndex = INDEX_NONE;
 	if (IsCorridorFormationActive())
@@ -4135,14 +4467,16 @@ bool UCombatEngagementSlotComponent::FindBestWaitAdmissionForAttackSlot(
 		if (FindCorridorWaitAdmissionForAttackSlot(
 			AttackSlotIndex,
 			false,
-			OutWaitSlotIndex))
+			OutWaitSlotIndex,
+			!bAllowUnarrivedWait))
 		{
 			return true;
 		}
 		return FindCorridorWaitAdmissionForAttackSlot(
 			AttackSlotIndex,
 			true,
-			OutWaitSlotIndex);
+			OutWaitSlotIndex,
+			!bAllowUnarrivedWait);
 	}
 	if (!AttackReservations.IsValidIndex(AttackSlotIndex))
 	{
@@ -4168,8 +4502,9 @@ bool UCombatEngagementSlotComponent::FindBestWaitAdmissionForAttackSlot(
 
 		FVector WaitSlotLocation;
 		if (!GetSlotWorldLocation(EBHCombatSlotType::Wait, WaitSlotIndex, WaitSlotLocation)
-			|| FVector::DistSquared2D(Requester->GetActorLocation(), WaitSlotLocation)
-				> FMath::Square(PromotionArrivalRadius))
+			|| (!bAllowUnarrivedWait
+				&& FVector::DistSquared2D(Requester->GetActorLocation(), WaitSlotLocation)
+					> FMath::Square(PromotionArrivalRadius)))
 		{
 			continue;
 		}
@@ -4460,6 +4795,10 @@ void UCombatEngagementSlotComponent::TryReformFormation()
 
 	LastReformOwnerLocation = OwnerLocation;
 	LastReformAnchorLocation = EngagementAnchorLocation;
+	if (IsPocketFormationActive())
+	{
+		ActivatePocketRapidReform();
+	}
 	ReformReservations();
 }
 
@@ -4539,16 +4878,36 @@ void UCombatEngagementSlotComponent::ReformRingReservations(
 					continue;
 				}
 
-				const float CurrentTravel = FVector::Dist2D(
-					RequesterA->GetActorLocation(),
-					SlotLocations[SlotA]) + FVector::Dist2D(
-					RequesterB->GetActorLocation(),
-					SlotLocations[SlotB]);
-				const float SwappedTravel = FVector::Dist2D(
-					RequesterA->GetActorLocation(),
-					SlotLocations[SlotB]) + FVector::Dist2D(
-					RequesterB->GetActorLocation(),
-					SlotLocations[SlotA]);
+				float CurrentTravelA = FVector::Dist2D(
+					RequesterA->GetActorLocation(), SlotLocations[SlotA]);
+				float CurrentTravelB = FVector::Dist2D(
+					RequesterB->GetActorLocation(), SlotLocations[SlotB]);
+				float SwappedTravelA = FVector::Dist2D(
+					RequesterA->GetActorLocation(), SlotLocations[SlotB]);
+				float SwappedTravelB = FVector::Dist2D(
+					RequesterB->GetActorLocation(), SlotLocations[SlotA]);
+				if (IsPocketFormationActive() && SlotType == EBHCombatSlotType::Attack)
+				{
+					const bool bCurrentPathsValid = GetNavigationPathScore(
+						RequesterA, SlotLocations[SlotA], CurrentTravelA)
+						&& GetNavigationPathScore(
+							RequesterB, SlotLocations[SlotB], CurrentTravelB);
+					const bool bSwappedPathsValid = GetNavigationPathScore(
+						RequesterA, SlotLocations[SlotB], SwappedTravelA)
+						&& GetNavigationPathScore(
+							RequesterB, SlotLocations[SlotA], SwappedTravelB);
+					if (!bSwappedPathsValid)
+					{
+						continue;
+					}
+					if (!bCurrentPathsValid)
+					{
+						CurrentTravelA = TNumericLimits<float>::Max() * 0.25f;
+						CurrentTravelB = TNumericLimits<float>::Max() * 0.25f;
+					}
+				}
+				const float CurrentTravel = CurrentTravelA + CurrentTravelB;
+				const float SwappedTravel = SwappedTravelA + SwappedTravelB;
 				const float TravelSaving = CurrentTravel - SwappedTravel;
 				if (TravelSaving >= MinimumSaving
 					&& (BestSlotA == INDEX_NONE || TravelSaving > BestSaving))
@@ -4873,6 +5232,35 @@ bool UCombatEngagementSlotComponent::ShouldUseCombatCoreEscape(
 		&& RequesterRadius < FMath::Max(
 			GetEffectiveCombatCoreRadius() + 1.0f,
 			CombatCoreEscapeExitRadius);
+}
+
+bool UCombatEngagementSlotComponent::CanUseDirectAttackCoreExit(
+	AActor* Requester,
+	const FVector& AttackSlotLocation) const
+{
+	const AActor* Owner = GetOwner();
+	if (!Requester || !Owner)
+	{
+		return false;
+	}
+
+	FVector RequesterDirection = Requester->GetActorLocation() - Owner->GetActorLocation();
+	RequesterDirection.Z = 0.0f;
+	FVector SlotDirection = AttackSlotLocation - Owner->GetActorLocation();
+	SlotDirection.Z = 0.0f;
+	const float RequesterRadius = RequesterDirection.Size2D();
+	const float SlotRadius = SlotDirection.Size2D();
+	if (RequesterRadius >= GetEffectiveCombatCoreRadius()
+		|| SlotRadius <= RequesterRadius + 5.0f
+		|| RequesterRadius <= UE_KINDA_SMALL_NUMBER
+		|| SlotRadius <= UE_KINDA_SMALL_NUMBER)
+	{
+		return false;
+	}
+
+	return FVector::DotProduct(
+		RequesterDirection / RequesterRadius,
+		SlotDirection / SlotRadius) >= 0.5f;
 }
 
 bool UCombatEngagementSlotComponent::ResolveCombatCoreEscapeGoal(
