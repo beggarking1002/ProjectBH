@@ -4170,16 +4170,15 @@ void UCombatEngagementSlotComponent::NotifyAllReservedRequestersSlotChanged() co
 
 void UCombatEngagementSlotComponent::RefreshPromotions()
 {
-	// Do not close the Attack ring around an enemy that is still evacuating the
-	// player-centered Combat Core. Outer queue compaction may continue safely.
-	if (!HasActiveCombatCoreEscape())
+	// CoreEscape is requester-local. A single crowded intruder must not freeze
+	// every vacant Attack slot: other Wait owners can fill the ring while the
+	// intruder keeps its outward waypoint. Enemy capsules do not block each other,
+	// and ResolveCombatCoreEscapeGoal already scores occupied escape corridors.
+	while (PromoteBestWaitReservationToAttack(false))
 	{
-		while (PromoteBestWaitReservationToAttack(false))
-		{
-		}
-		while (PromoteBestWaitReservationToAttack(true))
-		{
-		}
+	}
+	while (PromoteBestWaitReservationToAttack(true))
+	{
 	}
 
 	while (PromoteOldestReservation(
@@ -6250,7 +6249,7 @@ void UCombatEngagementSlotComponent::DrawDebugSlots() const
 		CurrentSpacingViolationCount,
 		PeakSpacingViolationCount,
 		MaximumAttackVacancy,
-		HasActiveCombatCoreEscape() ? TEXT("CoreEscape") : TEXT("Ready"));
+		HasActiveCombatCoreEscape() ? TEXT("Ready/CoreLocal") : TEXT("Ready"));
 	DrawDebugString(
 		World,
 		Owner->GetActorLocation() + FVector(0.0f, 0.0f, 170.0f),

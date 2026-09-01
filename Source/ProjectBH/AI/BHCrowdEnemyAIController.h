@@ -209,6 +209,34 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI|Recovery", meta = (ClampMin = "0.0", Units = "s"))
 	float FailedSlotCooldown = 2.0f;
 
+	/** Resolves symmetric Detour Crowd deadlocks when two live enemies already overlap. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI|Recovery|Overlap")
+	bool bEnableOverlapRecovery = true;
+
+	/** Fraction of the two capsule radii sum treated as an actual overlap. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI|Recovery|Overlap", meta = (ClampMin = "0.1", ClampMax = "1.5"))
+	float OverlapDetectionScale = 0.9f;
+
+	/** Enemies separated farther than this vertically are not part of the same overlap cluster. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI|Recovery|Overlap", meta = (ClampMin = "0.0", Units = "cm"))
+	float OverlapHeightTolerance = 100.0f;
+
+	/** Minimum short NavMesh move used to break an overlap without abandoning the reserved slot. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI|Recovery|Overlap", meta = (ClampMin = "10.0", Units = "cm"))
+	float OverlapEscapeDistance = 110.0f;
+
+	/** Extra desired clearance beyond the two capsule radii. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI|Recovery|Overlap", meta = (ClampMin = "0.0", Units = "cm"))
+	float OverlapEscapePadding = 20.0f;
+
+	/** Maximum time spent on one escape waypoint before normal pursuit resumes. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI|Recovery|Overlap", meta = (ClampMin = "0.1", Units = "s"))
+	float OverlapEscapeDuration = 0.75f;
+
+	/** Small retry gap that prevents escape-waypoint oscillation. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI|Recovery|Overlap", meta = (ClampMin = "0.0", Units = "s"))
+	float OverlapRecoveryCooldown = 0.25f;
+
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Debug|Crowd")
 	bool bDrawCrowdDebug = true;
 
@@ -227,6 +255,16 @@ private:
 	void ResetPursuitTracking();
 	void ReleaseCurrentCombatSlot(EBHCombatSlotReleaseReason Reason, bool bTemporarilyExcludeReleasedSlot = false);
 	void RecoverStalledCombatSlot(ABHEnemy* ControlledEnemy);
+	bool TryStartOverlapRecovery(ABHEnemy* ControlledEnemy);
+	bool UpdateOverlapRecovery(ABHEnemy* ControlledEnemy);
+	void FinishOverlapRecovery(bool bStopEscapeMove);
+	bool FindOverlapEscapeGoal(
+		ABHEnemy* ControlledEnemy,
+		FVector& OutEscapeGoal,
+		ABHEnemy*& OutPrimaryBlocker) const;
+	bool IsEnemyOverlapping(const ABHEnemy* FirstEnemy, const ABHEnemy* SecondEnemy) const;
+	bool ShouldYieldOverlap(const ABHEnemy* ControlledEnemy, const ABHEnemy* OtherEnemy) const;
+	int32 GetOverlapPriority(const ABHEnemy* Enemy) const;
 	bool ShouldPreserveQueuePosition(EBHCombatSlotReleaseReason Reason) const;
 	void RequestMoveToReservedSlot(const FVector& SlotLocation, float AcceptanceRadius);
 	bool UpdateStuckTracking(float DistanceToSlot, float Speed);
@@ -273,6 +311,12 @@ private:
 	FVector LastRequestedPursuitLocation = FVector::ZeroVector;
 	float ResolvedTargetRefreshInterval = 0.5f;
 	bool bSlotAssignmentRefreshQueued = false;
+	bool bOverlapRecoveryActive = false;
+	FVector OverlapRecoveryGoal = FVector::ZeroVector;
+	TWeakObjectPtr<ABHEnemy> OverlapRecoveryBlocker;
+	float OverlapRecoveryEndTime = 0.0f;
+	float OverlapRecoveryCooldownUntil = 0.0f;
+	FAIRequestID OverlapRecoveryRequestID = FAIRequestID::InvalidRequest;
 
 	FTimerHandle TargetRefreshTimerHandle;
 };

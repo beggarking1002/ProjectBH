@@ -9,6 +9,7 @@
 #include "../ProjectBH.h"
 #include "DrawDebugHelpers.h"
 #include "EngineUtils.h"
+#include "Components/CapsuleComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Navigation/CrowdFollowingComponent.h"
 #include "Navigation/PathFollowingComponent.h"
@@ -121,6 +122,7 @@ void ABHCrowdEnemyAIController::ApplyCrowdFollowingSettings()
 void ABHCrowdEnemyAIController::OnUnPossess()
 {
 	GetWorldTimerManager().ClearTimer(TargetRefreshTimerHandle);
+	FinishOverlapRecovery(false);
 	ReleaseCurrentCombatSlot(EBHCombatSlotReleaseReason::UnPossessed);
 	StopMovement();
 	ClearFocus(EAIFocusPriority::Gameplay);
@@ -135,6 +137,12 @@ void ABHCrowdEnemyAIController::OnUnPossess()
 void ABHCrowdEnemyAIController::OnMoveCompleted(FAIRequestID RequestID, const FPathFollowingResult& Result)
 {
 	Super::OnMoveCompleted(RequestID, Result);
+	if (bOverlapRecoveryActive && RequestID == OverlapRecoveryRequestID)
+	{
+		FinishOverlapRecovery(false);
+		NotifyCombatSlotAssignmentChanged();
+		return;
+	}
 	if (bHasRequestedPursuitMove)
 	{
 		bHasRequestedPursuitMove = false;
@@ -224,6 +232,19 @@ void ABHCrowdEnemyAIController::RefreshTargetAndMove()
 	// concrete pursuit/Attack ingress paths below opt back into Run.
 	ControlledEnemy->SetWantsRunLocomotion(false);
 
+	if (bOverlapRecoveryActive)
+	{
+		if (ControlledEnemy->IsAttackLocked())
+		{
+			FinishOverlapRecovery(true);
+		}
+		else if (UpdateOverlapRecovery(ControlledEnemy))
+		{
+			DrawDebugStatus(ControlledEnemy);
+			return;
+		}
+	}
+
 	if (ControlledEnemy->IsAttackLocked())
 	{
 		if (ControlledEnemy->GetCombatState() == EBHEnemyCombatState::Recovering
@@ -259,6 +280,12 @@ void ABHCrowdEnemyAIController::RefreshTargetAndMove()
 
 		StopMovement();
 		ApplyMovementIntent(ControlledEnemy, AttackIngressSpeed, true);
+		DrawDebugStatus(ControlledEnemy);
+		return;
+	}
+
+	if (TryStartOverlapRecovery(ControlledEnemy))
+	{
 		DrawDebugStatus(ControlledEnemy);
 		return;
 	}
@@ -418,7 +445,13 @@ void ABHCrowdEnemyAIController::RefreshTargetAndMove()
 	const float DistanceToSlot = FMath::Sqrt(DistanceToSlotSquared);
 	const float DistanceToMoveGoal = FVector::Dist2D(GetPawn()->GetActorLocation(), MoveGoal);
 	LastDistanceToSlot = DistanceToSlot;
-	const bool bAtReservedSlot = DistanceToSlotSquared <= FMath::Square(SlotAcceptanceRadius);
+	// An intermediate route goal has priority over the final reservation. In
+	// particular, a CoreEscape requester may be very close to a reformed Wait
+	// slot while still inside the player core. Settling by final-slot distance at
+	// that point would stop the escape forever and keep the old global promotion
+	// gate active.
+	const bool bAtReservedSlot = !IsIntermediateCombatRouteStage(CurrentMoveRouteStage)
+		&& DistanceToSlotSquared <= FMath::Square(SlotAcceptanceRadius);
 	const float CurrentMoveSpeed = ControlledEnemy->GetVelocity().Size2D();
 	const bool bCanSettleAtReservedSlot = bAtReservedSlot
 		&& CurrentMoveSpeed <= FMath::Max(0.0f, SlotSettleSpeedThreshold);
@@ -975,6 +1008,378 @@ void ABHCrowdEnemyAIController::RecoverStalledCombatSlot(ABHEnemy* ControlledEne
 	ReleaseCurrentCombatSlot(EBHCombatSlotReleaseReason::Stalled, true);
 }
 
+bool ABHCrowdEnemyAIController::TryStartOverlapRecovery(ABHEnemy* ControlledEnemy)
+{
+	if (!bEnableOverlapRecovery
+		|| !ControlledEnemy
+		|| !GetWorld()
+		|| ControlledEnemy->IsAttackLocked()
+		|| !ControlledEnemy->IsPoolActive()
+		|| GetWorld()->GetTimeSeconds() < OverlapRecoveryCooldownUntil)
+	{
+		return false;
+	}
+
+	FVector EscapeGoal;
+	ABHEnemy* PrimaryBlocker = nullptr;
+	if (!FindOverlapEscapeGoal(ControlledEnemy, EscapeGoal, PrimaryBlocker))
+	{
+		return false;
+	}
+
+	// Abort the old path before marking the escape request active. Its aborted
+	// completion must still be interpreted as the old pursuit/slot request.
+	StopMovement();
+	bHasRequestedPursuitMove = false;
+	bHasRequestedSlotMove = false;
+
+	bOverlapRecoveryActive = true;
+	OverlapRecoveryGoal = EscapeGoal;
+	OverlapRecoveryBlocker = PrimaryBlocker;
+	OverlapRecoveryEndTime = GetWorld()->GetTimeSeconds() + FMath::Max(0.1f, OverlapEscapeDuration);
+	OverlapRecoveryRequestID = FAIRequestID::InvalidRequest;
+	ResetStuckTracking();
+
+	// The normal crowd solver cannot break a perfectly symmetric overlap: both
+	// agents keep predicting the other into the same correction. Only the yielding
+	// agent temporarily ignores crowd separation while NavMesh/path collision still
+	// keeps the short escape move inside the traversable world.
+	if (UCrowdFollowingComponent* CrowdFollowing = Cast<UCrowdFollowingComponent>(GetPathFollowingComponent()))
+	{
+		CrowdFollowing->SetCrowdObstacleAvoidance(false);
+		CrowdFollowing->SetCrowdSeparation(false);
+		CrowdFollowing->SetCrowdSlowdownAtGoal(false);
+	}
+
+	FAIMoveRequest EscapeRequest(EscapeGoal);
+	EscapeRequest.SetAcceptanceRadius(10.0f);
+	EscapeRequest.SetReachTestIncludesAgentRadius(false);
+	EscapeRequest.SetReachTestIncludesGoalRadius(false);
+	EscapeRequest.SetUsePathfinding(true);
+	EscapeRequest.SetAllowPartialPath(false);
+	EscapeRequest.SetProjectGoalLocation(false);
+	EscapeRequest.SetCanStrafe(true);
+	const FPathFollowingRequestResult RequestResult = MoveTo(EscapeRequest);
+	if (RequestResult.Code == EPathFollowingRequestResult::Failed
+		|| RequestResult.Code == EPathFollowingRequestResult::AlreadyAtGoal)
+	{
+		FinishOverlapRecovery(false);
+		return false;
+	}
+
+	OverlapRecoveryRequestID = RequestResult.MoveId;
+	UE_LOG(
+		LogProjectBH,
+		Verbose,
+		TEXT("%s started overlap escape from %s toward %s without releasing its combat slot."),
+		*GetName(),
+		IsValid(PrimaryBlocker) ? *PrimaryBlocker->GetName() : TEXT("overlap cluster"),
+		*EscapeGoal.ToCompactString());
+	return true;
+}
+
+bool ABHCrowdEnemyAIController::UpdateOverlapRecovery(ABHEnemy* ControlledEnemy)
+{
+	if (!bOverlapRecoveryActive || !ControlledEnemy || !GetWorld())
+	{
+		return false;
+	}
+
+	bool bStillYieldingToOverlap = false;
+	for (TActorIterator<ABHEnemy> It(GetWorld()); It; ++It)
+	{
+		ABHEnemy* OtherEnemy = *It;
+		if (IsEnemyOverlapping(ControlledEnemy, OtherEnemy)
+			&& ShouldYieldOverlap(ControlledEnemy, OtherEnemy))
+		{
+			bStillYieldingToOverlap = true;
+			break;
+		}
+	}
+
+	const bool bReachedEscapeGoal = FVector::DistSquared2D(
+		ControlledEnemy->GetActorLocation(),
+		OverlapRecoveryGoal) <= FMath::Square(15.0f);
+	const bool bTimedOut = GetWorld()->GetTimeSeconds() >= OverlapRecoveryEndTime;
+	if (!bStillYieldingToOverlap || bReachedEscapeGoal || bTimedOut)
+	{
+		FinishOverlapRecovery(!bReachedEscapeGoal);
+		return false;
+	}
+
+	return true;
+}
+
+void ABHCrowdEnemyAIController::FinishOverlapRecovery(bool bStopEscapeMove)
+{
+	if (!bOverlapRecoveryActive)
+	{
+		return;
+	}
+
+	// Clear first so an Aborted completion emitted by StopMovement cannot be
+	// mistaken for the escape request itself.
+	bOverlapRecoveryActive = false;
+	OverlapRecoveryRequestID = FAIRequestID::InvalidRequest;
+	if (bStopEscapeMove)
+	{
+		StopMovement();
+	}
+
+	OverlapRecoveryGoal = FVector::ZeroVector;
+	OverlapRecoveryBlocker.Reset();
+	OverlapRecoveryEndTime = 0.0f;
+	OverlapRecoveryCooldownUntil = GetWorld()
+		? GetWorld()->GetTimeSeconds() + FMath::Max(0.0f, OverlapRecoveryCooldown)
+		: 0.0f;
+	ApplyCrowdFollowingSettings();
+	bForceSlotPathRefresh = true;
+	ResetStuckTracking();
+}
+
+bool ABHCrowdEnemyAIController::FindOverlapEscapeGoal(
+	ABHEnemy* ControlledEnemy,
+	FVector& OutEscapeGoal,
+	ABHEnemy*& OutPrimaryBlocker) const
+{
+	OutEscapeGoal = FVector::ZeroVector;
+	OutPrimaryBlocker = nullptr;
+	if (!ControlledEnemy || !GetWorld())
+	{
+		return false;
+	}
+
+	const UCapsuleComponent* ControlledCapsule = ControlledEnemy->GetCapsuleComponent();
+	if (!ControlledCapsule)
+	{
+		return false;
+	}
+
+	const FVector ControlledLocation = ControlledEnemy->GetActorLocation();
+	FVector CombinedAway = FVector::ZeroVector;
+	float DeepestPenetration = 0.0f;
+	TArray<TObjectPtr<ABHEnemy>> YieldBlockers;
+	for (TActorIterator<ABHEnemy> It(GetWorld()); It; ++It)
+	{
+		ABHEnemy* OtherEnemy = *It;
+		if (!IsEnemyOverlapping(ControlledEnemy, OtherEnemy)
+			|| !ShouldYieldOverlap(ControlledEnemy, OtherEnemy))
+		{
+			continue;
+		}
+
+		YieldBlockers.Add(OtherEnemy);
+		const UCapsuleComponent* OtherCapsule = OtherEnemy->GetCapsuleComponent();
+		const FVector Difference = ControlledLocation - OtherEnemy->GetActorLocation();
+		const float Distance = Difference.Size2D();
+		const float DesiredClearance = ControlledCapsule->GetScaledCapsuleRadius()
+			+ (OtherCapsule ? OtherCapsule->GetScaledCapsuleRadius() : 0.0f)
+			+ FMath::Max(0.0f, OverlapEscapePadding);
+		const float Penetration = FMath::Max(1.0f, DesiredClearance - Distance);
+		if (Distance > KINDA_SMALL_NUMBER)
+		{
+			CombinedAway += Difference.GetSafeNormal2D() * Penetration;
+		}
+		if (Penetration > DeepestPenetration)
+		{
+			DeepestPenetration = Penetration;
+			OutPrimaryBlocker = OtherEnemy;
+		}
+	}
+
+	if (YieldBlockers.IsEmpty())
+	{
+		return false;
+	}
+
+	if (CombinedAway.IsNearlyZero())
+	{
+		// Golden-angle hashing scatters actors spawned at the exact same transform,
+		// while remaining deterministic enough that they do not all choose one side.
+		const float AngleDegrees = FMath::Fmod(
+			static_cast<float>(ControlledEnemy->GetUniqueID()) * 137.507764f,
+			360.0f);
+		CombinedAway = FVector(
+			FMath::Cos(FMath::DegreesToRadians(AngleDegrees)),
+			FMath::Sin(FMath::DegreesToRadians(AngleDegrees)),
+			0.0f);
+	}
+	CombinedAway = CombinedAway.GetSafeNormal2D();
+
+	const UNavigationSystemV1* NavigationSystem = FNavigationSystem::GetCurrent<UNavigationSystemV1>(GetWorld());
+	if (!NavigationSystem)
+	{
+		return false;
+	}
+
+	struct FOverlapEscapeCandidate
+	{
+		FVector Location = FVector::ZeroVector;
+		float Score = -TNumericLimits<float>::Max();
+	};
+	TArray<FOverlapEscapeCandidate> Candidates;
+	const float EscapeDistance = FMath::Max(
+		FMath::Max(10.0f, OverlapEscapeDistance),
+		DeepestPenetration);
+	const bool bReverseSweep = (ControlledEnemy->GetUniqueID() & 1u) != 0;
+	const float CandidateAngles[] = { 0.0f, 45.0f, -45.0f, 90.0f, -90.0f, 135.0f, -135.0f, 180.0f };
+	for (float CandidateAngle : CandidateAngles)
+	{
+		const float ResolvedAngle = bReverseSweep ? -CandidateAngle : CandidateAngle;
+		const FVector CandidateDirection = CombinedAway.RotateAngleAxis(ResolvedAngle, FVector::UpVector);
+		FNavLocation ProjectedLocation;
+		if (!NavigationSystem->ProjectPointToNavigation(
+			ControlledLocation + CandidateDirection * EscapeDistance,
+			ProjectedLocation,
+			TargetNavProjectionExtent)
+			|| FVector::DistSquared2D(ControlledLocation, ProjectedLocation.Location) < FMath::Square(25.0f))
+		{
+			continue;
+		}
+
+		float MinimumEnemyClearance = TNumericLimits<float>::Max();
+		for (TActorIterator<ABHEnemy> OtherIt(GetWorld()); OtherIt; ++OtherIt)
+		{
+			const ABHEnemy* OtherEnemy = *OtherIt;
+			if (OtherEnemy == ControlledEnemy || !OtherEnemy->IsPoolActive())
+			{
+				continue;
+			}
+			MinimumEnemyClearance = FMath::Min(
+				MinimumEnemyClearance,
+				FVector::Dist2D(ProjectedLocation.Location, OtherEnemy->GetActorLocation()));
+		}
+		if (MinimumEnemyClearance == TNumericLimits<float>::Max())
+		{
+			MinimumEnemyClearance = EscapeDistance;
+		}
+
+		const FVector ActualDirection = (ProjectedLocation.Location - ControlledLocation).GetSafeNormal2D();
+		FOverlapEscapeCandidate& Candidate = Candidates.AddDefaulted_GetRef();
+		Candidate.Location = ProjectedLocation.Location;
+		Candidate.Score = MinimumEnemyClearance
+			+ FVector::DotProduct(ActualDirection, CombinedAway) * 50.0f;
+	}
+
+	Candidates.Sort([](const FOverlapEscapeCandidate& Left, const FOverlapEscapeCandidate& Right)
+	{
+		return Left.Score > Right.Score;
+	});
+	for (const FOverlapEscapeCandidate& Candidate : Candidates)
+	{
+		UNavigationPath* EscapePath = UNavigationSystemV1::FindPathToLocationSynchronously(
+			GetWorld(),
+			ControlledLocation,
+			Candidate.Location,
+			ControlledEnemy);
+		if (EscapePath && EscapePath->IsValid() && !EscapePath->IsPartial())
+		{
+			OutEscapeGoal = Candidate.Location;
+			return true;
+		}
+	}
+
+	return false;
+}
+
+bool ABHCrowdEnemyAIController::IsEnemyOverlapping(
+	const ABHEnemy* FirstEnemy,
+	const ABHEnemy* SecondEnemy) const
+{
+	if (!IsValid(FirstEnemy)
+		|| !IsValid(SecondEnemy)
+		|| FirstEnemy == SecondEnemy
+		|| !FirstEnemy->IsPoolActive()
+		|| !SecondEnemy->IsPoolActive())
+	{
+		return false;
+	}
+
+	const UCapsuleComponent* FirstCapsule = FirstEnemy->GetCapsuleComponent();
+	const UCapsuleComponent* SecondCapsule = SecondEnemy->GetCapsuleComponent();
+	if (!FirstCapsule || !SecondCapsule)
+	{
+		return false;
+	}
+
+	const FVector FirstLocation = FirstEnemy->GetActorLocation();
+	const FVector SecondLocation = SecondEnemy->GetActorLocation();
+	if (FMath::Abs(FirstLocation.Z - SecondLocation.Z) > FMath::Max(0.0f, OverlapHeightTolerance))
+	{
+		return false;
+	}
+
+	const float DetectionDistance = (
+		FirstCapsule->GetScaledCapsuleRadius()
+		+ SecondCapsule->GetScaledCapsuleRadius())
+		* FMath::Clamp(OverlapDetectionScale, 0.1f, 1.5f);
+	return FVector::DistSquared2D(FirstLocation, SecondLocation)
+		< FMath::Square(DetectionDistance);
+}
+
+bool ABHCrowdEnemyAIController::ShouldYieldOverlap(
+	const ABHEnemy* ControlledEnemy,
+	const ABHEnemy* OtherEnemy) const
+{
+	const int32 ControlledPriority = GetOverlapPriority(ControlledEnemy);
+	const int32 OtherPriority = GetOverlapPriority(OtherEnemy);
+	if (ControlledPriority != OtherPriority)
+	{
+		return ControlledPriority < OtherPriority;
+	}
+
+	// Stable tie-breaker: exactly one member of a pair yields, so two equal agents
+	// cannot mirror each other's recovery and remain deadlocked.
+	return ControlledEnemy && OtherEnemy
+		&& ControlledEnemy->GetUniqueID() > OtherEnemy->GetUniqueID();
+}
+
+int32 ABHCrowdEnemyAIController::GetOverlapPriority(const ABHEnemy* Enemy) const
+{
+	if (!IsValid(Enemy))
+	{
+		return 0;
+	}
+
+	switch (Enemy->GetCombatState())
+	{
+	case EBHEnemyCombatState::Staggered:
+		return 600;
+	case EBHEnemyCombatState::Attacking:
+		return 550;
+	case EBHEnemyCombatState::Recovering:
+		return 500;
+	case EBHEnemyCombatState::Dead:
+		return 0;
+	case EBHEnemyCombatState::Chasing:
+	default:
+		break;
+	}
+
+	const ABHCrowdEnemyAIController* OtherController = Cast<ABHCrowdEnemyAIController>(Enemy->GetController());
+	if (!OtherController)
+	{
+		// A live enemy without this controller cannot perform its own escape, so the
+		// controlled crowd agent must route around it.
+		return 450;
+	}
+
+	switch (OtherController->GetCurrentCombatSlotType())
+	{
+	case EBHCombatSlotType::Attack:
+		return 400;
+	case EBHCombatSlotType::Wait:
+		return 300;
+	case EBHCombatSlotType::Holding:
+		return 250;
+	case EBHCombatSlotType::Pending:
+		return 200;
+	case EBHCombatSlotType::None:
+	default:
+		return 100;
+	}
+}
+
 bool ABHCrowdEnemyAIController::ShouldPreserveQueuePosition(
 	EBHCombatSlotReleaseReason Reason) const
 {
@@ -1159,7 +1564,29 @@ void ABHCrowdEnemyAIController::DrawDebugStatus(const ABHEnemy* ControlledEnemy)
 	default:
 		break;
 	}
-	if (bHasRequestedSlotMove)
+	if (bOverlapRecoveryActive)
+	{
+		DrawDebugLine(
+			GetWorld(),
+			ControlledEnemy->GetActorLocation(),
+			OverlapRecoveryGoal,
+			FColor::Orange,
+			false,
+			ResolvedTargetRefreshInterval + 0.1f,
+			0,
+			4.0f);
+		DrawDebugSphere(
+			GetWorld(),
+			OverlapRecoveryGoal,
+			14.0f,
+			8,
+			FColor::Orange,
+			false,
+			ResolvedTargetRefreshInterval + 0.1f,
+			0,
+			2.0f);
+	}
+	else if (bHasRequestedSlotMove)
 	{
 		DrawDebugLine(
 			GetWorld(),
@@ -1207,7 +1634,7 @@ void ABHCrowdEnemyAIController::DrawDebugStatus(const ABHEnemy* ControlledEnemy)
 		? (ControlledEnemy->NeedsFormationCatchUp() ? TEXT("CatchUpRun") : TEXT("ApproachRun"))
 		: TEXT("Formation");
 	const FString DebugText = FString::Printf(
-		TEXT("%s/%s %.2fs | Target:%s Held:%.1f | %s[%d] Side:%d Lane:%d Seq:%llu Dist:%.0f Speed:%.1f Gait:%s Facing:%s Route:%s Stuck:%.1f/%.1f Starts:%d | Reform:%s(%d) | Last:%s"),
+		TEXT("%s/%s %.2fs | Target:%s Held:%.1f | %s[%d] Side:%d Lane:%d Seq:%llu Dist:%.0f Speed:%.1f Gait:%s Facing:%s Route:%s Overlap:%s Stuck:%.1f/%.1f Starts:%d | Reform:%s(%d) | Last:%s"),
 		*CombatStateName,
 		MovementMode,
 		ResolvedTargetRefreshInterval,
@@ -1223,6 +1650,7 @@ void ABHCrowdEnemyAIController::DrawDebugStatus(const ABHEnemy* ControlledEnemy)
 		GaitIntent,
 		FacingMode,
 		*RouteStageName,
+		bOverlapRecoveryActive ? TEXT("Escape") : TEXT("None"),
 		StuckElapsed,
 		NoProgressElapsed,
 		ControlledEnemy->GetSuccessfulAttackStartCount(),
