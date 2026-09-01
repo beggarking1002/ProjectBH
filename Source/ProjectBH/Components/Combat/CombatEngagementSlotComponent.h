@@ -25,7 +25,8 @@ enum class EBHCombatMoveRouteStage : uint8
 	AlignOnRing,
 	Ingress,
 	BypassCorePositive,
-	BypassCoreNegative
+	BypassCoreNegative,
+	CoreEscape
 };
 
 /** Coarse NavMesh space classification around the combat target. */
@@ -202,6 +203,22 @@ protected:
 	/** Maximum 2D NavMesh projection offset accepted for a dynamic Corridor bypass waypoint. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Approach Routing", meta = (ClampMin = "0.0", Units = "cm"))
 	float CombatCoreBypassProjectionTolerance = 35.0f;
+
+	/** Sends an enemy already trapped inside the Combat Core to a dedicated outer escape goal. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Core Escape")
+	bool bEnableCombatCoreEscape = true;
+
+	/** Radius an escaping enemy must reach before it may resume normal slot routing. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Core Escape", meta = (ClampMin = "1.0", Units = "cm"))
+	float CombatCoreEscapeExitRadius = 200.0f;
+
+	/** Number of directions inspected around the player when selecting an escape exit. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Core Escape", meta = (ClampMin = "4", ClampMax = "32"))
+	int32 CombatCoreEscapeCandidateCount = 16;
+
+	/** Minimum desired clearance between the escape segment and a current Attack-slot owner. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Core Escape", meta = (ClampMin = "0.0", Units = "cm"))
+	float CombatCoreEscapeOccupiedPathClearance = 105.0f;
 
 	/** Wait/Holding centers do not mirror every small player movement. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Engagement Anchor", meta = (ClampMin = "0.0", Units = "cm"))
@@ -458,6 +475,26 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Engagement Queue", meta = (ClampMin = "0.0", Units = "cm"))
 	float PromotionArrivalRadius = 60.0f;
 
+	/** Relaxes only the Wait-arrival requirement after an Attack slot stays empty this long. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Engagement Queue", meta = (ClampMin = "0.0", Units = "s"))
+	float AttackVacancyFallbackDelay = 0.25f;
+
+	/** An unlocked Attack owner must be at least this far from its slot before fast handover is considered. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Engagement Handover", meta = (ClampMin = "0.0", Units = "cm"))
+	float AttackHandoverOwnerDistance = 120.0f;
+
+	/** A Wait candidate must be this much closer than the current Attack owner. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Engagement Handover", meta = (ClampMin = "0.0", Units = "cm"))
+	float AttackHandoverDistanceAdvantage = 100.0f;
+
+	/** A stable better candidate must persist this long before the reservations are exchanged. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Engagement Handover", meta = (ClampMin = "0.0", Units = "s"))
+	float AttackHandoverDelay = 0.3f;
+
+	/** Blocks another exchange on the same Attack slot and the demoted owner for this long. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Engagement Handover", meta = (ClampMin = "0.0", Units = "s"))
+	float AttackHandoverCooldown = 0.75f;
+
 	/** Initial arrivals wait provisionally, then receive a congestion-aware formation after this quiet period. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Engagement Queue", meta = (ClampMin = "0.0", Units = "s"))
 	float InitialFormationSettleTime = 0.5f;
@@ -575,7 +612,8 @@ private:
 	bool FindCorridorWaitAdmissionForAttackSlot(
 		int32 AttackSlotIndex,
 		bool bAllowOtherSide,
-		int32& OutWaitSlotIndex) const;
+		int32& OutWaitSlotIndex,
+		bool bRequireWaitArrival = true) const;
 	FVector ResolveCorridorRearDirection(const FVector& UnsignedAxis) const;
 	bool IsCorridorFormationActive() const;
 	bool IsPocketFormationActive() const;
@@ -609,11 +647,18 @@ private:
 	void UpdateEngagementAnchor(float DeltaTime);
 	void PruneInvalidReservations();
 	void RefreshInitialFormationPhase();
+	void UpdateAttackVacancyTimers(float DeltaTime);
+	void RefreshFastAttackHandovers(float DeltaTime);
+	bool FindFastAttackHandoverCandidate(
+		int32 AttackSlotIndex,
+		AActor* CurrentAttackOwner,
+		int32& OutWaitSlotIndex) const;
+	void ResetAttackHandoverTracking(int32 AttackSlotIndex);
 	void FinalizeInitialFormationAssignments();
 	void NotifyRequesterSlotChanged(AActor* Requester) const;
 	void NotifyAllReservedRequestersSlotChanged() const;
 	void RefreshPromotions();
-	bool PromoteBestWaitReservationToAttack();
+	bool PromoteBestWaitReservationToAttack(bool bAllowUnarrivedWait = false);
 	bool PromoteOldestReservation(
 		TArray<TWeakObjectPtr<AActor>>& SourceReservations,
 		EBHCombatSlotType SourceType,
@@ -625,7 +670,8 @@ private:
 		int32& OutReservationIndex) const;
 	bool FindBestWaitAdmission(
 		int32& OutWaitSlotIndex,
-		int32& OutAttackSlotIndex) const;
+		int32& OutAttackSlotIndex,
+		bool bAllowUnarrivedWait = false) const;
 	bool FindBestWaitAdmissionForAttackSlot(
 		int32 AttackSlotIndex,
 		int32& OutWaitSlotIndex) const;
@@ -655,6 +701,14 @@ private:
 		const FVector& SegmentEnd,
 		float Radius) const;
 	float GetEffectiveCombatCoreRadius() const;
+	bool ShouldUseCombatCoreEscape(
+		AActor* Requester,
+		EBHCombatMoveRouteStage PreviousRouteStage) const;
+	bool ResolveCombatCoreEscapeGoal(
+		AActor* Requester,
+		FVector& OutMoveGoal,
+		EBHCombatMoveRouteStage& OutRouteStage) const;
+	bool HasActiveCombatCoreEscape() const;
 	bool ResolveCorridorCombatCoreBypassGoal(
 		AActor* Requester,
 		const FVector& FinalSlotLocation,
@@ -675,6 +729,10 @@ private:
 	void DrawCombatSpaceAnalysisDebug() const;
 
 	TArray<TWeakObjectPtr<AActor>> AttackReservations;
+	TArray<float> AttackSlotVacantElapsed;
+	TArray<TWeakObjectPtr<AActor>> AttackHandoverCandidates;
+	TArray<float> AttackHandoverElapsed;
+	TArray<float> AttackHandoverBlockedUntil;
 	TArray<TWeakObjectPtr<AActor>> WaitReservations;
 	TArray<TWeakObjectPtr<AActor>> HoldingReservations;
 

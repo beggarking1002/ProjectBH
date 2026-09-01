@@ -38,6 +38,7 @@ public:
 	void ResolveComboBranch();
 
 protected:
+	virtual void BeginPlay() override;
 	virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;
 	
 	/** Positions the camera behind the character and handles collision with level geometry. */

@@ -26,6 +26,7 @@ bool IsIntermediateCombatRouteStage(EBHCombatMoveRouteStage RouteStage)
 	case EBHCombatMoveRouteStage::AlignOnRing:
 	case EBHCombatMoveRouteStage::BypassCorePositive:
 	case EBHCombatMoveRouteStage::BypassCoreNegative:
+	case EBHCombatMoveRouteStage::CoreEscape:
 		return true;
 	case EBHCombatMoveRouteStage::Direct:
 	case EBHCombatMoveRouteStage::Ingress:
@@ -210,6 +211,37 @@ void ABHCrowdEnemyAIController::RefreshTargetAndMove()
 
 	if (ControlledEnemy->IsAttackLocked())
 	{
+		if (ControlledEnemy->GetCombatState() == EBHEnemyCombatState::Recovering
+			&& CurrentSlotType == EBHCombatSlotType::Attack
+			&& IsValid(CurrentSlotComponent))
+		{
+			EBHCombatSlotType ResolvedSlotType = EBHCombatSlotType::None;
+			int32 ResolvedSlotIndex = INDEX_NONE;
+			FVector ReservedSlotLocation;
+			if (CurrentSlotComponent->GetReservedSlot(
+				ControlledEnemy,
+				ResolvedSlotType,
+				ResolvedSlotIndex,
+				ReservedSlotLocation))
+			{
+				CurrentSlotType = ResolvedSlotType;
+				CurrentSlotIndex = ResolvedSlotIndex;
+				LastDistanceToSlot = FVector::Dist2D(
+					ControlledEnemy->GetActorLocation(),
+					ReservedSlotLocation);
+				if (CurrentSlotType == EBHCombatSlotType::Attack
+					&& LastDistanceToSlot > FMath::Max(
+						SlotAcceptanceRadius,
+						RecoveringAttackSlotLeashDistance))
+				{
+					StopMovement();
+					RecoverStalledCombatSlot(ControlledEnemy);
+					DrawDebugStatus(ControlledEnemy);
+					return;
+				}
+			}
+		}
+
 		StopMovement();
 		ApplyMovementIntent(ControlledEnemy, AttackIngressSpeed, true);
 		DrawDebugStatus(ControlledEnemy);
@@ -358,6 +390,7 @@ void ABHCrowdEnemyAIController::RefreshTargetAndMove()
 		return;
 	}
 	CurrentMoveRouteStage = ResolvedRouteStage;
+	bEscapingCombatCore = CurrentMoveRouteStage == EBHCombatMoveRouteStage::CoreEscape;
 
 	const float DistanceToSlotSquared = FVector::DistSquared2D(GetPawn()->GetActorLocation(), SlotLocation);
 	const float DistanceToSlot = FMath::Sqrt(DistanceToSlotSquared);
@@ -426,30 +459,7 @@ void ABHCrowdEnemyAIController::RefreshTargetAndMove()
 		&& UpdateStuckTracking(DistanceToMoveGoal, ControlledEnemy->GetVelocity().Size2D()))
 	{
 		StopMovement();
-		if (CurrentSlotType == EBHCombatSlotType::Attack
-			&& CurrentSlotComponent->HandleStalledAttackReservation(
-				ControlledEnemy,
-				FailedSlotCooldown))
-		{
-			LastReleaseReason = EBHCombatSlotReleaseReason::Stalled;
-			bHasRequestedSlotMove = false;
-			CurrentMoveRouteStage = EBHCombatMoveRouteStage::Direct;
-			LastRequestedRouteStage = EBHCombatMoveRouteStage::Direct;
-			ResetStuckTracking();
-
-			FVector DemotedSlotLocation;
-			CurrentSlotComponent->GetReservedSlot(
-				ControlledEnemy,
-				CurrentSlotType,
-				CurrentSlotIndex,
-				DemotedSlotLocation);
-			TrackedSlotType = CurrentSlotType;
-			TrackedSlotIndex = CurrentSlotIndex;
-			DrawDebugStatus(ControlledEnemy);
-			return;
-		}
-
-		ReleaseCurrentCombatSlot(EBHCombatSlotReleaseReason::Stalled, true);
+		RecoverStalledCombatSlot(ControlledEnemy);
 		DrawDebugStatus(ControlledEnemy);
 		return;
 	}
@@ -819,11 +829,51 @@ void ABHCrowdEnemyAIController::ReleaseCurrentCombatSlot(
 	bIsReforming = false;
 	CurrentMoveRouteStage = EBHCombatMoveRouteStage::Direct;
 	LastRequestedRouteStage = EBHCombatMoveRouteStage::Direct;
+	bEscapingCombatCore = false;
 	LastRequestedSlotLocation = FVector::ZeroVector;
 	bHasRequestedSlotMove = false;
 	TrackedSlotType = EBHCombatSlotType::None;
 	TrackedSlotIndex = INDEX_NONE;
 	ResetStuckTracking();
+}
+
+void ABHCrowdEnemyAIController::RecoverStalledCombatSlot(ABHEnemy* ControlledEnemy)
+{
+	if (!ControlledEnemy || !IsValid(CurrentSlotComponent))
+	{
+		ReleaseCurrentCombatSlot(EBHCombatSlotReleaseReason::Stalled, true);
+		return;
+	}
+
+	if (CurrentSlotType == EBHCombatSlotType::Attack
+		&& !bEscapingCombatCore
+		&& CurrentSlotComponent->HandleStalledAttackReservation(
+			ControlledEnemy,
+			FailedSlotCooldown))
+	{
+		LastReleaseReason = EBHCombatSlotReleaseReason::Stalled;
+		bHasRequestedSlotMove = false;
+		CurrentMoveRouteStage = EBHCombatMoveRouteStage::Direct;
+		LastRequestedRouteStage = EBHCombatMoveRouteStage::Direct;
+		ResetStuckTracking();
+
+		FVector DemotedSlotLocation;
+		if (CurrentSlotComponent->GetReservedSlot(
+			ControlledEnemy,
+			CurrentSlotType,
+			CurrentSlotIndex,
+			DemotedSlotLocation))
+		{
+			LastDistanceToSlot = FVector::Dist2D(
+				ControlledEnemy->GetActorLocation(),
+				DemotedSlotLocation);
+		}
+		TrackedSlotType = CurrentSlotType;
+		TrackedSlotIndex = CurrentSlotIndex;
+		return;
+	}
+
+	ReleaseCurrentCombatSlot(EBHCombatSlotReleaseReason::Stalled, true);
 }
 
 bool ABHCrowdEnemyAIController::ShouldPreserveQueuePosition(
@@ -854,6 +904,17 @@ void ABHCrowdEnemyAIController::RequestMoveToReservedSlot(
 	const FVector& SlotLocation,
 	float AcceptanceRadius)
 {
+	const bool bMoveGoalChanged = !bHasRequestedSlotMove
+		|| CurrentMoveRouteStage != LastRequestedRouteStage
+		|| FVector::DistSquared2D(LastRequestedSlotLocation, SlotLocation)
+			>= FMath::Square(GetCurrentSlotRepathDistance());
+	if (bMoveGoalChanged)
+	{
+		// Progress samples only describe one concrete movement leg. Carrying them
+		// across a changed slot/waypoint can falsely classify a valid repath as stuck.
+		ResetStuckTracking();
+	}
+
 	if (UCrowdFollowingComponent* CrowdFollowing = Cast<UCrowdFollowingComponent>(GetPathFollowingComponent()))
 	{
 		CrowdFollowing->SetCrowdSlowdownAtGoal(!IsIntermediateCombatRouteStage(CurrentMoveRouteStage));
@@ -893,6 +954,7 @@ bool ABHCrowdEnemyAIController::UpdateStuckTracking(float DistanceToSlot, float 
 		bHasProgressSample = true;
 		ProgressReferenceDistance = DistanceToSlot;
 		StuckElapsed = 0.0f;
+		NoProgressElapsed = 0.0f;
 		return false;
 	}
 
@@ -900,8 +962,14 @@ bool ABHCrowdEnemyAIController::UpdateStuckTracking(float DistanceToSlot, float 
 	{
 		ProgressReferenceDistance = DistanceToSlot;
 		StuckElapsed = 0.0f;
+		NoProgressElapsed = 0.0f;
 		return false;
 	}
+
+	// Crowd collision can produce visible velocity while two agents merely push
+	// against each other. Raw speed must not erase evidence that neither agent is
+	// making net progress toward its actual movement goal.
+	NoProgressElapsed += ResolvedTargetRefreshInterval;
 
 	if (Speed < StuckSpeedThreshold)
 	{
@@ -912,13 +980,15 @@ bool ABHCrowdEnemyAIController::UpdateStuckTracking(float DistanceToSlot, float 
 		StuckElapsed = 0.0f;
 	}
 
-	return StuckElapsed >= StuckTimeout;
+	return StuckElapsed >= StuckTimeout
+		|| NoProgressElapsed >= NoProgressTimeout;
 }
 
 void ABHCrowdEnemyAIController::ResetStuckTracking()
 {
 	ProgressReferenceDistance = 0.0f;
 	StuckElapsed = 0.0f;
+	NoProgressElapsed = 0.0f;
 	LastDistanceToSlot = 0.0f;
 	bHasProgressSample = false;
 }
@@ -969,6 +1039,9 @@ void ABHCrowdEnemyAIController::DrawDebugStatus(const ABHEnemy* ControlledEnemy)
 	case EBHCombatMoveRouteStage::BypassCoreNegative:
 		RouteColor = FColor(160, 80, 255);
 		break;
+	case EBHCombatMoveRouteStage::CoreEscape:
+		RouteColor = FColor(0, 255, 128);
+		break;
 	case EBHCombatMoveRouteStage::Direct:
 	default:
 		break;
@@ -1018,7 +1091,7 @@ void ABHCrowdEnemyAIController::DrawDebugStatus(const ABHEnemy* ControlledEnemy)
 		? TEXT("Target")
 		: TEXT("Move");
 	const FString DebugText = FString::Printf(
-		TEXT("%s/%s %.2fs | Target:%s Held:%.1f | %s[%d] Side:%d Lane:%d Seq:%llu Dist:%.0f Speed:%.1f Facing:%s Route:%s Stuck:%.1f Starts:%d | Reform:%s(%d) | Last:%s"),
+		TEXT("%s/%s %.2fs | Target:%s Held:%.1f | %s[%d] Side:%d Lane:%d Seq:%llu Dist:%.0f Speed:%.1f Facing:%s Route:%s Stuck:%.1f/%.1f Starts:%d | Reform:%s(%d) | Last:%s"),
 		*CombatStateName,
 		MovementMode,
 		ResolvedTargetRefreshInterval,
@@ -1034,6 +1107,7 @@ void ABHCrowdEnemyAIController::DrawDebugStatus(const ABHEnemy* ControlledEnemy)
 		FacingMode,
 		*RouteStageName,
 		StuckElapsed,
+		NoProgressElapsed,
 		ControlledEnemy->GetSuccessfulAttackStartCount(),
 		bIsReforming ? TEXT("Yes") : TEXT("No"),
 		ReformCount,

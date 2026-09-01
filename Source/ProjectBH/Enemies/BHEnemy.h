@@ -122,6 +122,7 @@ private:
 	void FinishStagger();
 	void Die();
 	void DisableDeathCollision();
+	void ConfigureLiveCollision();
 	void ApplyPoolPresentationState(bool bActive);
 	void DestroyCurrentAIController();
 	void ResetGameplayStateForPoolActivation();

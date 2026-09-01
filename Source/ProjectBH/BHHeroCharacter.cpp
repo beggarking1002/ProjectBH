@@ -3,6 +3,7 @@
 #include "BHHeroCharacter.h"
 
 #include "BHGameplayTags.h"
+#include "BHCollisionChannels.h"
 #include "AbilitySystem/BHAbilitySystemComponent.h"
 #include "AbilitySystem/GameplayEffects/BHGE_BasicAttackDamage.h"
 #include "ProjectBH.h"
@@ -22,6 +23,7 @@ ABHHeroCharacter::ABHHeroCharacter()
 {
 	AutoPossessAI = EAutoPossessAI::Disabled;
 	GetCapsuleComponent()->InitCapsuleSize(42.0f, 96.0f);
+	GetCapsuleComponent()->SetCollisionResponseToChannel(BHCollisionChannels::EnemyPawn, ECR_Block);
 
 	bUseControllerRotationPitch = false;
 	bUseControllerRotationYaw = false;
@@ -48,6 +50,12 @@ ABHHeroCharacter::ABHHeroCharacter()
 
 	ComboAttackSectionNames = { TEXT("Attack_A"), TEXT("Attack_B"), TEXT("Attack_C") };
 	BasicAttackDamageEffect = UBHGE_BasicAttackDamage::StaticClass();
+}
+
+void ABHHeroCharacter::BeginPlay()
+{
+	Super::BeginPlay();
+	GetCapsuleComponent()->SetCollisionResponseToChannel(BHCollisionChannels::EnemyPawn, ECR_Block);
 }
 
 void ABHHeroCharacter::SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent)
@@ -265,6 +273,7 @@ void ABHHeroCharacter::TraceSwordPoint(const FVector& TraceStart, const FVector&
 
 	FCollisionObjectQueryParams PawnObjectQueryParams;
 	PawnObjectQueryParams.AddObjectTypesToQuery(ECC_Pawn);
+	PawnObjectQueryParams.AddObjectTypesToQuery(BHCollisionChannels::EnemyPawn);
 	TArray<FHitResult> PawnHits;
 	GetWorld()->SweepMultiByObjectType(PawnHits, TraceStart, TraceEnd, FQuat::Identity, PawnObjectQueryParams, TraceShape, QueryParameters);
 

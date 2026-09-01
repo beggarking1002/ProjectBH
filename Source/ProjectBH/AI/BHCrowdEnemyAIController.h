@@ -64,6 +64,7 @@ public:
 	EBHCombatSlotType GetCurrentCombatSlotType() const { return CurrentSlotType; }
 
 	float GetSlotAcceptanceRadius() const { return SlotAcceptanceRadius; }
+	bool IsEscapingCombatCore() const { return bEscapingCombatCore; }
 
 	/** Releases the current reservation immediately and optionally delays the next request. */
 	void ReleaseCombatSlot(EBHCombatSlotReleaseReason Reason, float ReacquireDelay = 0.0f);
@@ -171,6 +172,14 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI|Recovery", meta = (ClampMin = "0.1", Units = "s"))
 	float StuckTimeout = 2.0f;
 
+	/** Hard watchdog for agents that keep jittering without getting closer to their move goal. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI|Recovery", meta = (ClampMin = "0.1", Units = "s"))
+	float NoProgressTimeout = 4.0f;
+
+	/** A recovering Attack owner farther than this from its slot yields immediately. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI|Recovery", meta = (ClampMin = "0.0", Units = "cm"))
+	float RecoveringAttackSlotLeashDistance = 60.0f;
+
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI|Recovery", meta = (ClampMin = "0.0", Units = "cm"))
 	float StuckProgressDistance = 20.0f;
 
@@ -196,6 +205,7 @@ private:
 	float GetCurrentSlotRepathDistance() const;
 	void ResetPursuitTracking();
 	void ReleaseCurrentCombatSlot(EBHCombatSlotReleaseReason Reason, bool bTemporarilyExcludeReleasedSlot = false);
+	void RecoverStalledCombatSlot(ABHEnemy* ControlledEnemy);
 	bool ShouldPreserveQueuePosition(EBHCombatSlotReleaseReason Reason) const;
 	void RequestMoveToReservedSlot(const FVector& SlotLocation, float AcceptanceRadius);
 	bool UpdateStuckTracking(float DistanceToSlot, float Speed);
@@ -217,11 +227,13 @@ private:
 	bool bHasRequestedSlotMove = false;
 	EBHCombatMoveRouteStage CurrentMoveRouteStage = EBHCombatMoveRouteStage::Direct;
 	EBHCombatMoveRouteStage LastRequestedRouteStage = EBHCombatMoveRouteStage::Direct;
+	bool bEscapingCombatCore = false;
 
 	EBHCombatSlotType TrackedSlotType = EBHCombatSlotType::None;
 	int32 TrackedSlotIndex = INDEX_NONE;
 	float ProgressReferenceDistance = 0.0f;
 	float StuckElapsed = 0.0f;
+	float NoProgressElapsed = 0.0f;
 	float LastDistanceToSlot = 0.0f;
 	bool bHasProgressSample = false;
 	bool bIsChainingIntermediateRoute = false;

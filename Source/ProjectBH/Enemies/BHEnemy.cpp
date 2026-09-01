@@ -8,6 +8,7 @@
 #include "../AbilitySystem/BHAttributeSet.h"
 #include "../AbilitySystem/GameplayEffects/BHGE_EnemyBasicAttackDamage.h"
 #include "../BHGameplayTags.h"
+#include "../BHCollisionChannels.h"
 #include "../Combat/BHAttackDefinition.h"
 #include "../DataAssets/Enemy/DataAsset_EnemyConfig.h"
 #include "../ProjectBH.h"
@@ -31,12 +32,14 @@ ABHEnemy::ABHEnemy()
 	bUseControllerRotationYaw = false;
 	GetCharacterMovement()->bOrientRotationToMovement = false;
 	GetCharacterMovement()->bUseControllerDesiredRotation = true;
+	ConfigureLiveCollision();
 
 }
 
 void ABHEnemy::BeginPlay()
 {
 	Super::BeginPlay();
+	ConfigureLiveCollision();
 
 	if (EnemyConfigDataAsset)
 	{
@@ -523,6 +526,21 @@ void ABHEnemy::DisableDeathCollision()
 	MulticastSetDeathCollisionEnabled(false);
 }
 
+void ABHEnemy::ConfigureLiveCollision()
+{
+	UCapsuleComponent* Capsule = GetCapsuleComponent();
+	if (!Capsule)
+	{
+		return;
+	}
+
+	Capsule->SetCollisionObjectType(BHCollisionChannels::EnemyPawn);
+	Capsule->SetCollisionResponseToChannel(BHCollisionChannels::EnemyPawn, ECR_Ignore);
+	Capsule->SetCollisionResponseToChannel(ECC_Pawn, ECR_Block);
+	Capsule->SetCollisionResponseToChannel(ECC_WorldStatic, ECR_Block);
+	Capsule->SetCollisionResponseToChannel(ECC_WorldDynamic, ECR_Block);
+}
+
 void ABHEnemy::ApplyPoolPresentationState(bool bActive)
 {
 	SetActorHiddenInGame(!bActive);
@@ -534,6 +552,10 @@ void ABHEnemy::ApplyPoolPresentationState(bool bActive)
 	}
 	if (GetCapsuleComponent())
 	{
+		if (bActive)
+		{
+			ConfigureLiveCollision();
+		}
 		GetCapsuleComponent()->SetCollisionEnabled(
 			bActive ? ECollisionEnabled::QueryAndPhysics : ECollisionEnabled::NoCollision);
 	}
