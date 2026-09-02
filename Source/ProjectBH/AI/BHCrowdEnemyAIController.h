@@ -49,6 +49,7 @@ enum class EBHFormationMovementRole : uint8
 	WaitIngressDeferred,
 	HoldingTransit,
 	StationaryHolding,
+	HoldingYield,
 	PendingTransit
 };
 
@@ -78,6 +79,7 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "AI|Formation")
 	EBHFormationMovementRole GetFormationMovementRole() const { return CurrentFormationMovementRole; }
+	bool IsTemporaryHoldingYieldActive() const { return bHoldingYieldActive; }
 
 	float GetSlotAcceptanceRadius() const { return SlotAcceptanceRadius; }
 	bool IsEscapingCombatCore() const { return bEscapingCombatCore; }
@@ -87,6 +89,12 @@ public:
 
 	/** Queues a next-frame path refresh after the central slot manager changes this enemy's assignment. */
 	void NotifyCombatSlotAssignmentChanged();
+
+	/** Temporarily moves a stationary Holding owner aside without releasing its reservation. */
+	bool RequestTemporaryHoldingYield(
+		AActor* PassingRequester,
+		const FVector& PassingPathDirection,
+		const FVector& YieldGoal);
 
 protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI|Crowd")
@@ -149,6 +157,29 @@ protected:
 	/** Retry cadence while a Wait departure is held behind an active Attack ingress path. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI|Traffic Priority", meta = (ClampMin = "0.05", Units = "s"))
 	float WaitIngressDeferRetryInterval = 0.2f;
+
+	/** No-progress time required before asking one stationary Holding owner to yield. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI|Traffic Priority", meta = (ClampMin = "0.1", Units = "s"))
+	float HoldingYieldTriggerDelay = 0.75f;
+
+	/** Minimum time the Holding owner stays aside before pass detection can release it. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI|Traffic Priority", meta = (ClampMin = "0.0", Units = "s"))
+	float HoldingYieldMinimumDuration = 0.3f;
+
+	/** Safety timeout after which the Holding owner returns even if pass detection fails. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI|Traffic Priority", meta = (ClampMin = "0.1", Units = "s"))
+	float HoldingYieldMaximumDuration = 1.5f;
+
+	/** Distance past the Holding owner's original cross-section that counts as a pass. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI|Traffic Priority", meta = (ClampMin = "0.0", Units = "cm"))
+	float HoldingYieldPassDistance = 45.0f;
+
+	/** Prevents one stalled requester from successively displacing multiple Holding owners. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI|Traffic Priority", meta = (ClampMin = "0.0", Units = "s"))
+	float HoldingYieldRequestCooldown = 1.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI|Traffic Priority", meta = (ClampMin = "1.0", Units = "cm"))
+	float HoldingYieldAcceptanceRadius = 15.0f;
 
 	/** Lead a moving player by this much while outside formation. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI|Pursuit", meta = (ClampMin = "0.0", Units = "s"))
@@ -289,6 +320,8 @@ private:
 	void RequestMoveToReservedSlot(const FVector& SlotLocation, float AcceptanceRadius);
 	void ScheduleWaitIngressRetry();
 	void ClearWaitIngressDeferral();
+	bool UpdateTemporaryHoldingYield(ABHEnemy* ControlledEnemy);
+	void FinishTemporaryHoldingYield(bool bStopYieldMove);
 	bool UpdateStuckTracking(float DistanceToSlot, float Speed);
 	void ResetStuckTracking();
 	void DrawDebugStatus(const ABHEnemy* ControlledEnemy) const;
@@ -313,6 +346,15 @@ private:
 	EBHFormationMovementRole CurrentFormationMovementRole = EBHFormationMovementRole::None;
 	bool bWaitIngressDeferred = false;
 	TWeakObjectPtr<AActor> WaitIngressBlockingAttackRequester;
+	bool bHoldingYieldActive = false;
+	bool bHoldingYieldAtGoal = false;
+	FVector HoldingYieldGoal = FVector::ZeroVector;
+	FVector HoldingYieldOrigin = FVector::ZeroVector;
+	FVector HoldingYieldPassingDirection = FVector::ZeroVector;
+	TWeakObjectPtr<AActor> HoldingYieldPassingRequester;
+	float HoldingYieldStartTime = 0.0f;
+	float HoldingYieldRequestCooldownUntil = 0.0f;
+	FAIRequestID HoldingYieldRequestID = FAIRequestID::InvalidRequest;
 
 	EBHCombatSlotType TrackedSlotType = EBHCombatSlotType::None;
 	int32 TrackedSlotIndex = INDEX_NONE;

@@ -3531,6 +3531,272 @@ bool UCombatEngagementSlotComponent::ShouldDeferWaitIngress(
 	return false;
 }
 
+bool UCombatEngagementSlotComponent::TryYieldBlockingStationaryHolding(
+	AActor* MovingRequester,
+	const FVector& MoveGoal) const
+{
+	UWorld* World = GetWorld();
+	AActor* Owner = GetOwner();
+	const ABHEnemy* MovingEnemy = Cast<ABHEnemy>(MovingRequester);
+	const UCapsuleComponent* MovingCapsule = MovingEnemy
+		? MovingEnemy->GetCapsuleComponent()
+		: nullptr;
+	if (!bEnableStationaryHoldingYield
+		|| !World
+		|| !Owner
+		|| !Owner->HasAuthority()
+		|| !MovingEnemy
+		|| !MovingCapsule)
+	{
+		return false;
+	}
+
+	// Keep the intervention deliberately narrow: this engagement may displace at
+	// most one arrived Holding owner at a time.
+	for (const TWeakObjectPtr<AActor>& Reservation : HoldingReservations)
+	{
+		const ABHEnemy* HoldingEnemy = Cast<ABHEnemy>(Reservation.Get());
+		const ABHCrowdEnemyAIController* HoldingController = HoldingEnemy
+			? Cast<ABHCrowdEnemyAIController>(HoldingEnemy->GetController())
+			: nullptr;
+		if (HoldingController && HoldingController->IsTemporaryHoldingYieldActive())
+		{
+			return false;
+		}
+	}
+
+	UNavigationPath* MovingPath = UNavigationSystemV1::FindPathToLocationSynchronously(
+		World,
+		MovingRequester->GetActorLocation(),
+		MoveGoal,
+		MovingRequester);
+	if (!MovingPath
+		|| !MovingPath->IsValid()
+		|| MovingPath->IsPartial()
+		|| MovingPath->PathPoints.Num() < 2)
+	{
+		return false;
+	}
+
+	struct FBlockingHoldingCandidate
+	{
+		ABHEnemy* Enemy = nullptr;
+		ABHCrowdEnemyAIController* Controller = nullptr;
+		FVector PathDirection = FVector::ZeroVector;
+		float DistanceAlongPath = TNumericLimits<float>::Max();
+		float ConflictRadius = 0.0f;
+	};
+	FBlockingHoldingCandidate BlockingCandidate;
+	const float MovingRadius = MovingCapsule->GetScaledCapsuleRadius();
+	const float MaximumLookAhead = FMath::Max(0.0f, HoldingBlockerLookAheadDistance);
+	const float HeightTolerance = FMath::Max(0.0f, AttackIngressTrafficHeightTolerance);
+
+	for (const TWeakObjectPtr<AActor>& Reservation : HoldingReservations)
+	{
+		ABHEnemy* HoldingEnemy = Cast<ABHEnemy>(Reservation.Get());
+		ABHCrowdEnemyAIController* HoldingController = HoldingEnemy
+			? Cast<ABHCrowdEnemyAIController>(HoldingEnemy->GetController())
+			: nullptr;
+		const UCapsuleComponent* HoldingCapsule = HoldingEnemy
+			? HoldingEnemy->GetCapsuleComponent()
+			: nullptr;
+		if (!HoldingEnemy
+			|| HoldingEnemy == MovingRequester
+			|| !HoldingController
+			|| !HoldingCapsule
+			|| HoldingEnemy->GetCombatState() != EBHEnemyCombatState::Chasing
+			|| HoldingController->GetFormationMovementRole()
+				!= EBHFormationMovementRole::StationaryHolding
+			|| HoldingEnemy->GetVelocity().Size2D() > 10.0f)
+		{
+			continue;
+		}
+
+		const FVector HoldingLocation = HoldingEnemy->GetActorLocation();
+		const float ConflictRadius = MovingRadius
+			+ HoldingCapsule->GetScaledCapsuleRadius()
+			+ FMath::Max(0.0f, HoldingBlockerPathPadding);
+		const float ConflictRadiusSquared = FMath::Square(ConflictRadius);
+		float AccumulatedPathDistance = 0.0f;
+		for (int32 PointIndex = 1;
+			PointIndex < MovingPath->PathPoints.Num();
+			++PointIndex)
+		{
+			const FVector SegmentStart = MovingPath->PathPoints[PointIndex - 1];
+			const FVector SegmentEnd = MovingPath->PathPoints[PointIndex];
+			const FVector2D SegmentStart2D(SegmentStart);
+			const FVector2D SegmentEnd2D(SegmentEnd);
+			const FVector2D Segment = SegmentEnd2D - SegmentStart2D;
+			const float SegmentLength = Segment.Size();
+			if (SegmentLength <= UE_KINDA_SMALL_NUMBER)
+			{
+				continue;
+			}
+
+			const float Alpha = FMath::Clamp(
+				FVector2D::DotProduct(
+					FVector2D(HoldingLocation) - SegmentStart2D,
+					Segment) / FMath::Square(SegmentLength),
+				0.0f,
+				1.0f);
+			const FVector ClosestPoint(
+				SegmentStart2D + Segment * Alpha,
+				FMath::Lerp(SegmentStart.Z, SegmentEnd.Z, Alpha));
+			const float DistanceAlongPath = AccumulatedPathDistance
+				+ SegmentLength * Alpha;
+			if (DistanceAlongPath > MaximumLookAhead)
+			{
+				break;
+			}
+			if (DistanceAlongPath >= 10.0f
+				&& FMath::Abs(HoldingLocation.Z - ClosestPoint.Z) <= HeightTolerance
+				&& FVector::DistSquared2D(HoldingLocation, ClosestPoint)
+					<= ConflictRadiusSquared
+				&& DistanceAlongPath < BlockingCandidate.DistanceAlongPath)
+			{
+				BlockingCandidate.Enemy = HoldingEnemy;
+				BlockingCandidate.Controller = HoldingController;
+				BlockingCandidate.PathDirection = FVector(
+					Segment.X,
+					Segment.Y,
+					0.0f).GetSafeNormal2D();
+				BlockingCandidate.DistanceAlongPath = DistanceAlongPath;
+				BlockingCandidate.ConflictRadius = ConflictRadius;
+			}
+			AccumulatedPathDistance += SegmentLength;
+		}
+	}
+
+	if (!BlockingCandidate.Enemy
+		|| !BlockingCandidate.Controller
+		|| BlockingCandidate.PathDirection.IsNearlyZero())
+	{
+		return false;
+	}
+
+	const FVector BlockingLocation = BlockingCandidate.Enemy->GetActorLocation();
+	FVector OutwardDirection = BlockingLocation - Owner->GetActorLocation();
+	OutwardDirection.Z = 0.0f;
+	OutwardDirection = OutwardDirection.GetSafeNormal2D();
+	const FVector PathPerpendicular(
+		-BlockingCandidate.PathDirection.Y,
+		BlockingCandidate.PathDirection.X,
+		0.0f);
+	const float PreferredSign = FVector::DotProduct(PathPerpendicular, OutwardDirection) >= 0.0f
+		? 1.0f
+		: -1.0f;
+	const FVector YieldDirections[] =
+	{
+		PathPerpendicular * PreferredSign,
+		PathPerpendicular * -PreferredSign
+	};
+
+	auto GetDistanceSquaredToMovingPath = [&MovingPath](const FVector& Point)
+	{
+		float BestDistanceSquared = TNumericLimits<float>::Max();
+		for (int32 PointIndex = 1;
+			PointIndex < MovingPath->PathPoints.Num();
+			++PointIndex)
+		{
+			const FVector SegmentStart = MovingPath->PathPoints[PointIndex - 1];
+			const FVector SegmentEnd = MovingPath->PathPoints[PointIndex];
+			const FVector ClosestPoint = FMath::ClosestPointOnSegment(
+				FVector(Point.X, Point.Y, 0.0f),
+				FVector(SegmentStart.X, SegmentStart.Y, 0.0f),
+				FVector(SegmentEnd.X, SegmentEnd.Y, 0.0f));
+			BestDistanceSquared = FMath::Min(
+				BestDistanceSquared,
+				FVector::DistSquared2D(Point, ClosestPoint));
+		}
+		return BestDistanceSquared;
+	};
+
+	FVector BestYieldGoal = FVector::ZeroVector;
+	float BestYieldScore = TNumericLimits<float>::Max();
+	const float YieldDistance = FMath::Max(1.0f, HoldingYieldDistance);
+	const float ProjectionToleranceSquared = FMath::Square(
+		FMath::Max(0.0f, HoldingYieldProjectionTolerance));
+	const float RequiredPathClearanceSquared = FMath::Square(
+		BlockingCandidate.ConflictRadius + FMath::Max(0.0f, HoldingBlockerPathPadding));
+	const float BlockingRadius = BlockingCandidate.Enemy->GetCapsuleComponent()
+		? BlockingCandidate.Enemy->GetCapsuleComponent()->GetScaledCapsuleRadius()
+		: 45.0f;
+	const float BlockingOwnerRadius = FVector::Dist2D(
+		BlockingLocation,
+		Owner->GetActorLocation());
+	for (const FVector& YieldDirection : YieldDirections)
+	{
+		const FVector DesiredYieldGoal = BlockingLocation + YieldDirection * YieldDistance;
+		FVector ProjectedYieldGoal;
+		if (!ProjectToNavigation(DesiredYieldGoal, ProjectedYieldGoal)
+			|| FVector::DistSquared2D(DesiredYieldGoal, ProjectedYieldGoal)
+				> ProjectionToleranceSquared
+			|| GetDistanceSquaredToMovingPath(ProjectedYieldGoal)
+				< RequiredPathClearanceSquared
+			|| FVector::Dist2D(ProjectedYieldGoal, Owner->GetActorLocation())
+				< BlockingOwnerRadius - 10.0f)
+		{
+			continue;
+		}
+
+		bool bHardOverlap = false;
+		for (const FEngagementQueueEntry& Entry : EngagementQueue)
+		{
+			const ABHEnemy* OtherEnemy = Cast<ABHEnemy>(Entry.Requester.Get());
+			const UCapsuleComponent* OtherCapsule = OtherEnemy
+				? OtherEnemy->GetCapsuleComponent()
+				: nullptr;
+			if (!OtherEnemy
+				|| OtherEnemy == BlockingCandidate.Enemy
+				|| !OtherCapsule
+				|| FMath::Abs(OtherEnemy->GetActorLocation().Z - ProjectedYieldGoal.Z)
+					> HeightTolerance)
+			{
+				continue;
+			}
+
+			const float HardOverlapDistance = 0.8f
+				* (BlockingRadius + OtherCapsule->GetScaledCapsuleRadius())
+				+ FMath::Max(0.0f, HoldingYieldOccupancyPadding);
+			if (FVector::DistSquared2D(
+				OtherEnemy->GetActorLocation(),
+				ProjectedYieldGoal) < FMath::Square(HardOverlapDistance))
+			{
+				bHardOverlap = true;
+				break;
+			}
+		}
+		if (bHardOverlap)
+		{
+			continue;
+		}
+
+		float PathScore = 0.0f;
+		if (!GetNavigationPathScoreBetween(
+			BlockingCandidate.Enemy,
+			BlockingLocation,
+			ProjectedYieldGoal,
+			PathScore))
+		{
+			continue;
+		}
+
+		const float CandidateScore = PathScore
+			+ FVector::Dist2D(DesiredYieldGoal, ProjectedYieldGoal);
+		if (CandidateScore < BestYieldScore)
+		{
+			BestYieldScore = CandidateScore;
+			BestYieldGoal = ProjectedYieldGoal;
+		}
+	}
+
+	return BestYieldScore < TNumericLimits<float>::Max()
+		&& BlockingCandidate.Controller->RequestTemporaryHoldingYield(
+			MovingRequester,
+			BlockingCandidate.PathDirection,
+			BestYieldGoal);
+}
+
 void UCombatEngagementSlotComponent::ReleaseSlot(AActor* Requester, bool bPreserveQueuePosition)
 {
 	if (!Requester || !GetOwner() || !GetOwner()->HasAuthority())

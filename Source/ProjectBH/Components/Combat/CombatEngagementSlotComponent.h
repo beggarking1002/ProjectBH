@@ -92,6 +92,11 @@ public:
 		const FVector& WaitMoveGoal,
 		AActor*& OutBlockingAttackRequester) const;
 
+	/** Moves one stationary Holding owner aside when it is the nearest blocker on a stalled ingress path. */
+	bool TryYieldBlockingStationaryHolding(
+		AActor* MovingRequester,
+		const FVector& MoveGoal) const;
+
 	/** Releases every slot owned by Requester and optionally preserves its central queue priority. */
 	void ReleaseSlot(AActor* Requester, bool bPreserveQueuePosition = false);
 
@@ -571,6 +576,30 @@ protected:
 	/** Path segments separated by more than this height are treated as different traffic layers. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Traffic Priority", meta = (ClampMin = "0.0", Units = "cm"))
 	float AttackIngressTrafficHeightTolerance = 100.0f;
+
+	/** Enables narrow, evidence-based yielding by an arrived Holding owner. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Traffic Priority")
+	bool bEnableStationaryHoldingYield = true;
+
+	/** Only Holding blockers this far ahead on the current Nav path may yield. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Traffic Priority", meta = (ClampMin = "0.0", Units = "cm"))
+	float HoldingBlockerLookAheadDistance = 260.0f;
+
+	/** Extra path-tube clearance used when identifying a blocking Holding owner. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Traffic Priority", meta = (ClampMin = "0.0", Units = "cm"))
+	float HoldingBlockerPathPadding = 10.0f;
+
+	/** Lateral distance used for the temporary Holding yield goal. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Traffic Priority", meta = (ClampMin = "1.0", Units = "cm"))
+	float HoldingYieldDistance = 130.0f;
+
+	/** Maximum projection drift accepted for a temporary yield goal. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Traffic Priority", meta = (ClampMin = "0.0", Units = "cm"))
+	float HoldingYieldProjectionTolerance = 70.0f;
+
+	/** Hard-overlap padding used when checking whether a yield goal is already occupied. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Traffic Priority", meta = (ClampMin = "0.0", Units = "cm"))
+	float HoldingYieldOccupancyPadding = 5.0f;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Engagement Slots")
 	FVector NavProjectionExtent = FVector(50.0f, 50.0f, 200.0f);

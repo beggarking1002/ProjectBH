@@ -123,6 +123,7 @@ void ABHCrowdEnemyAIController::OnUnPossess()
 {
 	GetWorldTimerManager().ClearTimer(TargetRefreshTimerHandle);
 	ClearWaitIngressDeferral();
+	FinishTemporaryHoldingYield(false);
 	FinishOverlapRecovery(false);
 	ReleaseCurrentCombatSlot(EBHCombatSlotReleaseReason::UnPossessed);
 	StopMovement();
@@ -138,6 +139,20 @@ void ABHCrowdEnemyAIController::OnUnPossess()
 void ABHCrowdEnemyAIController::OnMoveCompleted(FAIRequestID RequestID, const FPathFollowingResult& Result)
 {
 	Super::OnMoveCompleted(RequestID, Result);
+	if (bHoldingYieldActive && RequestID == HoldingYieldRequestID)
+	{
+		HoldingYieldRequestID = FAIRequestID::InvalidRequest;
+		if (Result.Code == EPathFollowingResult::Success)
+		{
+			bHoldingYieldAtGoal = true;
+		}
+		else
+		{
+			FinishTemporaryHoldingYield(false);
+			NotifyCombatSlotAssignmentChanged();
+		}
+		return;
+	}
 	if (bOverlapRecoveryActive && RequestID == OverlapRecoveryRequestID)
 	{
 		FinishOverlapRecovery(false);
@@ -212,6 +227,82 @@ void ABHCrowdEnemyAIController::NotifyCombatSlotAssignmentChanged()
 		&ThisClass::RefreshAfterCombatSlotAssignmentChanged);
 }
 
+bool ABHCrowdEnemyAIController::RequestTemporaryHoldingYield(
+	AActor* PassingRequester,
+	const FVector& PassingPathDirection,
+	const FVector& YieldGoal)
+{
+	ABHEnemy* ControlledEnemy = Cast<ABHEnemy>(GetPawn());
+	if (!HasAuthority()
+		|| !ControlledEnemy
+		|| !GetWorld()
+		|| !PassingRequester
+		|| bHoldingYieldActive
+		|| bOverlapRecoveryActive
+		|| ControlledEnemy->IsAttackLocked()
+		|| CurrentSlotType != EBHCombatSlotType::Holding
+		|| CurrentFormationMovementRole != EBHFormationMovementRole::StationaryHolding
+		|| GetWorld()->GetTimeSeconds() < HoldingYieldRequestCooldownUntil)
+	{
+		return false;
+	}
+
+	FVector PassingDirection = PassingPathDirection;
+	PassingDirection.Z = 0.0f;
+	if (!PassingDirection.Normalize())
+	{
+		return false;
+	}
+
+	StopMovement();
+	bHasRequestedSlotMove = false;
+	ResetStuckTracking();
+
+	bHoldingYieldActive = true;
+	bHoldingYieldAtGoal = false;
+	HoldingYieldGoal = YieldGoal;
+	HoldingYieldOrigin = ControlledEnemy->GetActorLocation();
+	HoldingYieldPassingDirection = PassingDirection;
+	HoldingYieldPassingRequester = PassingRequester;
+	HoldingYieldStartTime = GetWorld()->GetTimeSeconds();
+	HoldingYieldRequestID = FAIRequestID::InvalidRequest;
+	CurrentFormationMovementRole = EBHFormationMovementRole::HoldingYield;
+	ControlledEnemy->SetWantsRunLocomotion(false);
+	ControlledEnemy->SetFormationCatchUpRequired(false);
+	ApplyMovementIntent(ControlledEnemy, HoldingMoveSpeed, true);
+
+	FAIMoveRequest YieldRequest(YieldGoal);
+	YieldRequest.SetAcceptanceRadius(FMath::Max(1.0f, HoldingYieldAcceptanceRadius));
+	YieldRequest.SetReachTestIncludesAgentRadius(false);
+	YieldRequest.SetReachTestIncludesGoalRadius(false);
+	YieldRequest.SetUsePathfinding(true);
+	YieldRequest.SetAllowPartialPath(false);
+	YieldRequest.SetProjectGoalLocation(false);
+	YieldRequest.SetCanStrafe(true);
+	const FPathFollowingRequestResult RequestResult = MoveTo(YieldRequest);
+	if (RequestResult.Code == EPathFollowingRequestResult::Failed)
+	{
+		FinishTemporaryHoldingYield(false);
+		return false;
+	}
+	if (RequestResult.Code == EPathFollowingRequestResult::AlreadyAtGoal)
+	{
+		bHoldingYieldAtGoal = true;
+	}
+	else
+	{
+		HoldingYieldRequestID = RequestResult.MoveId;
+	}
+
+	UE_LOG(
+		LogProjectBH,
+		Verbose,
+		TEXT("%s temporarily yielded its Holding path for %s without releasing the reservation."),
+		*GetName(),
+		*PassingRequester->GetName());
+	return true;
+}
+
 void ABHCrowdEnemyAIController::RefreshAfterCombatSlotAssignmentChanged()
 {
 	bSlotAssignmentRefreshQueued = false;
@@ -233,6 +324,19 @@ void ABHCrowdEnemyAIController::RefreshTargetAndMove()
 	// concrete pursuit/Attack ingress paths below opt back into Run.
 	ControlledEnemy->SetWantsRunLocomotion(false);
 	CurrentFormationMovementRole = EBHFormationMovementRole::None;
+
+	if (bHoldingYieldActive)
+	{
+		if (ControlledEnemy->IsAttackLocked())
+		{
+			FinishTemporaryHoldingYield(true);
+		}
+		else if (UpdateTemporaryHoldingYield(ControlledEnemy))
+		{
+			DrawDebugStatus(ControlledEnemy);
+			return;
+		}
+	}
 
 	if (bOverlapRecoveryActive)
 	{
@@ -587,8 +691,29 @@ void ABHCrowdEnemyAIController::RefreshTargetAndMove()
 		GetCurrentSlotMoveSpeed(ControlledEnemy),
 		true);
 
+	const bool bMovementStalled = bHasRequestedSlotMove
+		&& UpdateStuckTracking(DistanceToMoveGoal, ControlledEnemy->GetVelocity().Size2D());
+	const float CurrentTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
+	const bool bCanRequestHoldingYield = CurrentSlotType == EBHCombatSlotType::Attack
+		|| CurrentSlotType == EBHCombatSlotType::Wait;
+	bool bHoldingYieldStarted = false;
 	if (bHasRequestedSlotMove
-		&& UpdateStuckTracking(DistanceToMoveGoal, ControlledEnemy->GetVelocity().Size2D()))
+		&& bCanRequestHoldingYield
+		&& NoProgressElapsed >= FMath::Max(0.1f, HoldingYieldTriggerDelay)
+		&& CurrentTime >= HoldingYieldRequestCooldownUntil)
+	{
+		HoldingYieldRequestCooldownUntil = CurrentTime
+			+ FMath::Max(0.0f, HoldingYieldRequestCooldown);
+		bHoldingYieldStarted = CurrentSlotComponent->TryYieldBlockingStationaryHolding(
+			ControlledEnemy,
+			MoveGoal);
+	}
+	if (bHoldingYieldStarted)
+	{
+		bForceSlotPathRefresh = true;
+		ResetStuckTracking();
+	}
+	else if (bMovementStalled)
 	{
 		StopMovement();
 		RecoverStalledCombatSlot(ControlledEnemy);
@@ -965,6 +1090,8 @@ void ABHCrowdEnemyAIController::ReleaseCurrentCombatSlot(
 	EBHCombatSlotReleaseReason Reason,
 	bool bTemporarilyExcludeReleasedSlot)
 {
+	FinishTemporaryHoldingYield(true);
+
 	if (Reason == EBHCombatSlotReleaseReason::TargetChanged
 		|| Reason == EBHCombatSlotReleaseReason::TargetLost
 		|| Reason == EBHCombatSlotReleaseReason::LeftEngagementRange
@@ -1494,6 +1621,84 @@ void ABHCrowdEnemyAIController::ClearWaitIngressDeferral()
 	WaitIngressBlockingAttackRequester.Reset();
 }
 
+bool ABHCrowdEnemyAIController::UpdateTemporaryHoldingYield(ABHEnemy* ControlledEnemy)
+{
+	if (!bHoldingYieldActive || !ControlledEnemy || !GetWorld())
+	{
+		return false;
+	}
+
+	const float CurrentTime = GetWorld()->GetTimeSeconds();
+	const float Elapsed = CurrentTime - HoldingYieldStartTime;
+	AActor* PassingRequester = HoldingYieldPassingRequester.Get();
+	const float PassedDistance = PassingRequester
+		? FVector::DotProduct(
+			PassingRequester->GetActorLocation() - HoldingYieldOrigin,
+			HoldingYieldPassingDirection)
+		: 0.0f;
+	const bool bPassed = bHoldingYieldAtGoal
+		&& PassingRequester
+		&& Elapsed >= FMath::Max(0.0f, HoldingYieldMinimumDuration)
+		&& PassedDistance >= FMath::Max(0.0f, HoldingYieldPassDistance);
+	const bool bTimedOut = Elapsed >= FMath::Max(
+		FMath::Max(0.1f, HoldingYieldMinimumDuration),
+		HoldingYieldMaximumDuration);
+	if (!PassingRequester
+		|| CurrentSlotType != EBHCombatSlotType::Holding
+		|| !IsValid(CurrentSlotComponent)
+		|| bPassed
+		|| bTimedOut)
+	{
+		FinishTemporaryHoldingYield(true);
+		return false;
+	}
+
+	if (!bHoldingYieldAtGoal
+		&& HoldingYieldRequestID == FAIRequestID::InvalidRequest
+		&& GetMoveStatus() != EPathFollowingStatus::Moving)
+	{
+		FinishTemporaryHoldingYield(false);
+		return false;
+	}
+
+	CurrentFormationMovementRole = EBHFormationMovementRole::HoldingYield;
+	ControlledEnemy->SetWantsRunLocomotion(false);
+	ControlledEnemy->SetFormationCatchUpRequired(false);
+	ApplyMovementIntent(ControlledEnemy, HoldingMoveSpeed, true);
+	return true;
+}
+
+void ABHCrowdEnemyAIController::FinishTemporaryHoldingYield(bool bStopYieldMove)
+{
+	if (!bHoldingYieldActive)
+	{
+		return;
+	}
+
+	// Clear first so StopMovement's aborted completion cannot be interpreted as
+	// the active temporary-yield request.
+	bHoldingYieldActive = false;
+	HoldingYieldRequestID = FAIRequestID::InvalidRequest;
+	if (bStopYieldMove)
+	{
+		StopMovement();
+	}
+
+	bHoldingYieldAtGoal = false;
+	HoldingYieldGoal = FVector::ZeroVector;
+	HoldingYieldOrigin = FVector::ZeroVector;
+	HoldingYieldPassingDirection = FVector::ZeroVector;
+	HoldingYieldPassingRequester.Reset();
+	HoldingYieldStartTime = 0.0f;
+	HoldingYieldRequestCooldownUntil = GetWorld()
+		? GetWorld()->GetTimeSeconds() + FMath::Max(0.0f, HoldingYieldRequestCooldown)
+		: 0.0f;
+	CurrentFormationMovementRole = EBHFormationMovementRole::None;
+	bHasRequestedSlotMove = false;
+	bForceSlotPathRefresh = true;
+	ResetStuckTracking();
+}
+
 void ABHCrowdEnemyAIController::RequestMoveToReservedSlot(
 	const FVector& SlotLocation,
 	float AcceptanceRadius)
@@ -1673,6 +1878,28 @@ void ABHCrowdEnemyAIController::DrawDebugStatus(const ABHEnemy* ControlledEnemy)
 			14.0f,
 			8,
 			FColor::Orange,
+			false,
+			ResolvedTargetRefreshInterval + 0.1f,
+			0,
+			2.0f);
+	}
+	else if (bHoldingYieldActive)
+	{
+		DrawDebugLine(
+			GetWorld(),
+			ControlledEnemy->GetActorLocation(),
+			HoldingYieldGoal,
+			FColor(180, 70, 255),
+			false,
+			ResolvedTargetRefreshInterval + 0.1f,
+			0,
+			4.0f);
+		DrawDebugSphere(
+			GetWorld(),
+			HoldingYieldGoal,
+			14.0f,
+			8,
+			FColor(180, 70, 255),
 			false,
 			ResolvedTargetRefreshInterval + 0.1f,
 			0,
