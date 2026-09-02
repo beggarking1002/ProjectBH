@@ -1953,54 +1953,82 @@ void UCombatEngagementSlotComponent::RepackCorridorLayerReservations(
 		}
 		Reservation.Reset();
 	}
-	Requesters.Sort([this](const TWeakObjectPtr<AActor>& Left, const TWeakObjectPtr<AActor>& Right)
-	{
-		return GetQueueSequence(Left.Get()) < GetQueueSequence(Right.Get());
-	});
-
 	const TArray<FCorridorRowSlot>* Layout = SlotType == EBHCombatSlotType::Wait
 		? &CorridorWaitRowLayout
 		: (SlotType == EBHCombatSlotType::Holding ? &CorridorHoldingRowLayout : nullptr);
-	for (const TWeakObjectPtr<AActor>& RequesterPtr : Requesters)
+	while (!Requesters.IsEmpty())
 	{
-		AActor* Requester = RequesterPtr.Get();
-		if (!Requester)
+		int32 BestRequesterIndex = INDEX_NONE;
+		int32 BestSlotIndex = INDEX_NONE;
+		float BestTravelSquared = TNumericLimits<float>::Max();
+		uint64 BestSequence = TNumericLimits<uint64>::Max();
+		for (int32 RequesterIndex = 0; RequesterIndex < Requesters.Num(); ++RequesterIndex)
 		{
-			continue;
-		}
-
-		const int32 RequesterSideIndex = GetCorridorSideIndex(Requester);
-		int32 PackedSlotIndex = INDEX_NONE;
-		for (int32 SlotIndex = 0; SlotIndex < Reservations.Num(); ++SlotIndex)
-		{
-			if (Reservations[SlotIndex].IsValid()
-				|| !Layout
-				|| !Layout->IsValidIndex(SlotIndex)
-				|| (*Layout)[SlotIndex].SideIndex != RequesterSideIndex)
+			AActor* Requester = Requesters[RequesterIndex].Get();
+			if (!Requester)
 			{
 				continue;
 			}
-			PackedSlotIndex = SlotIndex;
+
+			const int32 RequesterSideIndex = GetCorridorSideIndex(Requester);
+			const uint64 Sequence = GetQueueSequence(Requester);
+			for (int32 SlotIndex = 0; SlotIndex < Reservations.Num(); ++SlotIndex)
+			{
+				if (Reservations[SlotIndex].IsValid()
+					|| !Layout
+					|| !Layout->IsValidIndex(SlotIndex)
+					|| (*Layout)[SlotIndex].SideIndex != RequesterSideIndex)
+				{
+					continue;
+				}
+
+				const float TravelSquared = FVector::DistSquared2D(
+					Requester->GetActorLocation(),
+					(*Layout)[SlotIndex].WorldLocation);
+				const bool bShorterTravel = TravelSquared + 1.0f < BestTravelSquared;
+				const bool bSameTravelOlder = FMath::IsNearlyEqual(
+					TravelSquared,
+					BestTravelSquared,
+					1.0f) && Sequence < BestSequence;
+				if (BestRequesterIndex == INDEX_NONE || bShorterTravel || bSameTravelOlder)
+				{
+					BestRequesterIndex = RequesterIndex;
+					BestSlotIndex = SlotIndex;
+					BestTravelSquared = TravelSquared;
+					BestSequence = Sequence;
+				}
+			}
+		}
+
+		if (BestRequesterIndex == INDEX_NONE || BestSlotIndex == INDEX_NONE)
+		{
 			break;
 		}
 
+		AActor* Requester = Requesters[BestRequesterIndex].Get();
 		const int32* PreviousSlotIndex = PreviousSlotIndices.Find(Requester);
-		if (PackedSlotIndex != INDEX_NONE)
-		{
-			Reservations[PackedSlotIndex] = Requester;
-		}
+		Reservations[BestSlotIndex] = Requester;
 		if (bNotifyMovedRequesters
 			&& (!PreviousSlotIndex
-				|| *PreviousSlotIndex != PackedSlotIndex))
+				|| *PreviousSlotIndex != BestSlotIndex))
 		{
 			NotifyRequesterSlotChanged(Requester);
+		}
+		Requesters.RemoveAtSwap(BestRequesterIndex, 1, EAllowShrinking::No);
+	}
+
+	if (bNotifyMovedRequesters)
+	{
+		for (const TWeakObjectPtr<AActor>& UnassignedRequester : Requesters)
+		{
+			NotifyRequesterSlotChanged(UnassignedRequester.Get());
 		}
 	}
 
 	UE_LOG(
 		LogProjectBH,
 		VeryVerbose,
-		TEXT("%s densely repacked Corridor %s reservations by side-local queue sequence."),
+		TEXT("%s repacked Corridor %s reservations by side-local minimum travel."),
 		GetOwner() ? *GetOwner()->GetName() : TEXT("InvalidSlotOwner"),
 		*StaticEnum<EBHCombatSlotType>()->GetNameStringByValue(static_cast<int64>(SlotType)));
 }
@@ -3384,6 +3412,125 @@ bool UCombatEngagementSlotComponent::GetMoveGoalForReservedSlot(
 	return true;
 }
 
+bool UCombatEngagementSlotComponent::ShouldDeferWaitIngress(
+	AActor* WaitRequester,
+	const FVector& WaitMoveGoal,
+	AActor*& OutBlockingAttackRequester) const
+{
+	OutBlockingAttackRequester = nullptr;
+	UWorld* World = GetWorld();
+	if (!bEnableAttackIngressPriority || !WaitRequester || !World)
+	{
+		return false;
+	}
+
+	UNavigationPath* WaitPath = UNavigationSystemV1::FindPathToLocationSynchronously(
+		World,
+		WaitRequester->GetActorLocation(),
+		WaitMoveGoal,
+		WaitRequester);
+	if (!WaitPath || !WaitPath->IsValid() || WaitPath->IsPartial()
+		|| WaitPath->PathPoints.Num() < 2)
+	{
+		return false;
+	}
+
+	const ABHEnemy* WaitEnemy = Cast<ABHEnemy>(WaitRequester);
+	const UCapsuleComponent* WaitCapsule = WaitEnemy
+		? WaitEnemy->GetCapsuleComponent()
+		: nullptr;
+	const float WaitRadius = WaitCapsule
+		? WaitCapsule->GetScaledCapsuleRadius()
+		: 45.0f;
+	const float HeightTolerance = FMath::Max(0.0f, AttackIngressTrafficHeightTolerance);
+	for (int32 AttackSlotIndex = 0;
+		AttackSlotIndex < GetActiveAttackSlotCount();
+		++AttackSlotIndex)
+	{
+		AActor* AttackRequester = AttackReservations.IsValidIndex(AttackSlotIndex)
+			? AttackReservations[AttackSlotIndex].Get()
+			: nullptr;
+		const ABHEnemy* AttackEnemy = Cast<ABHEnemy>(AttackRequester);
+		if (!AttackEnemy
+			|| AttackRequester == WaitRequester
+			|| AttackEnemy->GetCombatState() != EBHEnemyCombatState::Chasing)
+		{
+			continue;
+		}
+
+		FVector AttackSlotLocation;
+		if (!GetSlotWorldLocation(
+			EBHCombatSlotType::Attack,
+			AttackSlotIndex,
+			AttackSlotLocation)
+			|| FVector::DistSquared2D(
+				AttackRequester->GetActorLocation(),
+				AttackSlotLocation)
+				<= FMath::Square(FMath::Max(0.0f, AttackIngressTrafficArrivalRadius)))
+		{
+			continue;
+		}
+
+		UNavigationPath* AttackPath = UNavigationSystemV1::FindPathToLocationSynchronously(
+			World,
+			AttackRequester->GetActorLocation(),
+			AttackSlotLocation,
+			AttackRequester);
+		if (!AttackPath || !AttackPath->IsValid() || AttackPath->IsPartial()
+			|| AttackPath->PathPoints.Num() < 2)
+		{
+			continue;
+		}
+
+		const UCapsuleComponent* AttackCapsule = AttackEnemy->GetCapsuleComponent();
+		const float AttackRadius = AttackCapsule
+			? AttackCapsule->GetScaledCapsuleRadius()
+			: 45.0f;
+		const float ConflictRadius = WaitRadius
+			+ AttackRadius
+			+ FMath::Max(0.0f, AttackIngressPathPadding);
+		const float ConflictRadiusSquared = FMath::Square(ConflictRadius);
+		for (int32 WaitPointIndex = 1;
+			WaitPointIndex < WaitPath->PathPoints.Num();
+			++WaitPointIndex)
+		{
+			const FVector WaitStart = WaitPath->PathPoints[WaitPointIndex - 1];
+			const FVector WaitEnd = WaitPath->PathPoints[WaitPointIndex];
+			const float WaitMidZ = 0.5f * (WaitStart.Z + WaitEnd.Z);
+			for (int32 AttackPointIndex = 1;
+				AttackPointIndex < AttackPath->PathPoints.Num();
+				++AttackPointIndex)
+			{
+				const FVector AttackStart = AttackPath->PathPoints[AttackPointIndex - 1];
+				const FVector AttackEnd = AttackPath->PathPoints[AttackPointIndex];
+				const float AttackMidZ = 0.5f * (AttackStart.Z + AttackEnd.Z);
+				if (FMath::Abs(WaitMidZ - AttackMidZ) > HeightTolerance)
+				{
+					continue;
+				}
+
+				FVector ClosestOnWait;
+				FVector ClosestOnAttack;
+				FMath::SegmentDistToSegmentSafe(
+					FVector(WaitStart.X, WaitStart.Y, 0.0f),
+					FVector(WaitEnd.X, WaitEnd.Y, 0.0f),
+					FVector(AttackStart.X, AttackStart.Y, 0.0f),
+					FVector(AttackEnd.X, AttackEnd.Y, 0.0f),
+					ClosestOnWait,
+					ClosestOnAttack);
+				if (FVector::DistSquared2D(ClosestOnWait, ClosestOnAttack)
+					<= ConflictRadiusSquared)
+				{
+					OutBlockingAttackRequester = AttackRequester;
+					return true;
+				}
+			}
+		}
+	}
+
+	return false;
+}
+
 void UCombatEngagementSlotComponent::ReleaseSlot(AActor* Requester, bool bPreserveQueuePosition)
 {
 	if (!Requester || !GetOwner() || !GetOwner()->HasAuthority())
@@ -4217,20 +4364,12 @@ void UCombatEngagementSlotComponent::FinalizeInitialFormationAssignments()
 		UpdateCorridorSideForAttackReservation(Requester, AttackSlotIndex);
 	}
 
-	while (FindOldestPendingRequester(Requester))
+	while (PromoteBestOuterRequesterToWait())
 	{
-		if (!TryReserveSlot(Requester, EBHCombatSlotType::Wait))
-		{
-			break;
-		}
 	}
 
-	while (FindOldestPendingRequester(Requester))
+	while (AssignBestPendingRequesterToHolding())
 	{
-		if (!TryReserveSlot(Requester, EBHCombatSlotType::Holding))
-		{
-			break;
-		}
 	}
 
 	++FormationRevision;
@@ -4277,14 +4416,14 @@ void UCombatEngagementSlotComponent::RefreshPromotions()
 	{
 	}
 
-	while (PromoteOldestReservation(
-		HoldingReservations,
-		EBHCombatSlotType::Holding,
-		EBHCombatSlotType::Wait))
+	// A vacant Wait slot is filled directly from the best reachable outer requester.
+	// Requiring a Holding owner to first arrive at its blue slot creates a visible
+	// stop-and-go waypoint before it is immediately sent inward again.
+	while (PromoteBestOuterRequesterToWait())
 	{
 	}
 
-	while (AssignOldestPendingRequesterToHolding())
+	while (AssignBestPendingRequesterToHolding())
 	{
 	}
 }
@@ -4335,133 +4474,165 @@ bool UCombatEngagementSlotComponent::PromoteBestWaitReservationToAttack(bool bAl
 	return true;
 }
 
-bool UCombatEngagementSlotComponent::PromoteOldestReservation(
-	TArray<TWeakObjectPtr<AActor>>& SourceReservations,
-	EBHCombatSlotType SourceType,
-	EBHCombatSlotType DestinationType)
+bool UCombatEngagementSlotComponent::PromoteBestOuterRequesterToWait()
 {
-	TArray<int32> EligibleSourceIndices;
-	for (int32 SourceIndex = 0; SourceIndex < SourceReservations.Num(); ++SourceIndex)
+	AActor* BestRequester = nullptr;
+	int32 BestWaitSlotIndex = INDEX_NONE;
+	int32 BestHoldingSlotIndex = INDEX_NONE;
+	float BestPathScore = TNumericLimits<float>::Max();
+	uint64 BestSequence = TNumericLimits<uint64>::Max();
+	for (int32 WaitSlotIndex = 0; WaitSlotIndex < WaitReservations.Num(); ++WaitSlotIndex)
 	{
-		AActor* Requester = SourceReservations[SourceIndex].Get();
-		FVector SourceSlotLocation;
-		if (Requester
-			&& GetSlotWorldLocation(SourceType, SourceIndex, SourceSlotLocation)
-			&& FVector::DistSquared2D(Requester->GetActorLocation(), SourceSlotLocation)
-				<= FMath::Square(PromotionArrivalRadius))
-		{
-			EligibleSourceIndices.Add(SourceIndex);
-		}
-	}
-	EligibleSourceIndices.Sort([this, &SourceReservations](int32 LeftIndex, int32 RightIndex)
-	{
-		return GetQueueSequence(SourceReservations[LeftIndex].Get())
-			< GetQueueSequence(SourceReservations[RightIndex].Get());
-	});
-
-	for (int32 SourceIndex : EligibleSourceIndices)
-	{
-		AActor* Requester = SourceReservations[SourceIndex].Get();
-		if (!Requester)
+		if (WaitReservations[WaitSlotIndex].IsValid())
 		{
 			continue;
 		}
 
-		SourceReservations[SourceIndex].Reset();
-		const float MaxDistanceFromOwner = DestinationType == EBHCombatSlotType::Attack
-			? GetMaximumAttackSlotDistance(Requester)
-			: -1.0f;
-		if (!TryReserveSlot(Requester, DestinationType, MaxDistanceFromOwner))
+		FVector WaitSlotLocation;
+		if (!GetSlotWorldLocation(
+			EBHCombatSlotType::Wait,
+			WaitSlotIndex,
+			WaitSlotLocation))
 		{
-			SourceReservations[SourceIndex] = Requester;
 			continue;
 		}
-		if (IsCorridorFormationActive())
+
+		for (const FEngagementQueueEntry& Entry : EngagementQueue)
 		{
-			RepackCorridorLayerReservations(SourceReservations, SourceType, true);
-			if (DestinationType == EBHCombatSlotType::Wait)
+			AActor* Requester = Entry.Requester.Get();
+			int32 AttackSlotIndex = INDEX_NONE;
+			int32 ExistingWaitSlotIndex = INDEX_NONE;
+			if (!Requester
+				|| FindReservation(AttackReservations, Requester, AttackSlotIndex)
+				|| FindReservation(WaitReservations, Requester, ExistingWaitSlotIndex))
 			{
-				RepackCorridorLayerReservations(
-					WaitReservations,
-					EBHCombatSlotType::Wait,
-					true);
+				continue;
+			}
+			if (IsCorridorFormationActive()
+				&& (!CorridorWaitRowLayout.IsValidIndex(WaitSlotIndex)
+					|| CorridorWaitRowLayout[WaitSlotIndex].SideIndex
+						!= GetCorridorSideIndex(Requester)))
+			{
+				continue;
+			}
+
+			float PathScore = 0.0f;
+			if (!GetNavigationPathScore(Requester, WaitSlotLocation, PathScore))
+			{
+				continue;
+			}
+
+			const uint64 Sequence = GetQueueSequence(Requester);
+			const bool bBetterPath = PathScore + 1.0f < BestPathScore;
+			const bool bSamePathOlder = FMath::IsNearlyEqual(
+				PathScore,
+				BestPathScore,
+				1.0f) && Sequence < BestSequence;
+			if (!BestRequester || bBetterPath || bSamePathOlder)
+			{
+				BestRequester = Requester;
+				BestWaitSlotIndex = WaitSlotIndex;
+				BestPathScore = PathScore;
+				BestSequence = Sequence;
+				BestHoldingSlotIndex = INDEX_NONE;
+				FindReservation(
+					HoldingReservations,
+					Requester,
+					BestHoldingSlotIndex);
 			}
 		}
-		NotifyRequesterSlotChanged(Requester);
-
-		UE_LOG(
-			LogProjectBH,
-			Display,
-			TEXT("%s promoted %s from %s to %s."),
-			GetOwner() ? *GetOwner()->GetName() : TEXT("InvalidSlotOwner"),
-			*Requester->GetName(),
-			*StaticEnum<EBHCombatSlotType>()->GetNameStringByValue(static_cast<int64>(SourceType)),
-			*StaticEnum<EBHCombatSlotType>()->GetNameStringByValue(static_cast<int64>(DestinationType)));
-		return true;
 	}
-	return false;
+
+	if (!BestRequester || !WaitReservations.IsValidIndex(BestWaitSlotIndex))
+	{
+		return false;
+	}
+	if (HoldingReservations.IsValidIndex(BestHoldingSlotIndex)
+		&& HoldingReservations[BestHoldingSlotIndex].Get() == BestRequester)
+	{
+		HoldingReservations[BestHoldingSlotIndex].Reset();
+	}
+	WaitReservations[BestWaitSlotIndex] = BestRequester;
+	NotifyRequesterSlotChanged(BestRequester);
+
+	UE_LOG(
+		LogProjectBH,
+		Display,
+		TEXT("%s routed %s directly from the outer reserve to Wait slot %d by path cost."),
+		GetOwner() ? *GetOwner()->GetName() : TEXT("InvalidSlotOwner"),
+		*BestRequester->GetName(),
+		BestWaitSlotIndex);
+	return true;
 }
 
-bool UCombatEngagementSlotComponent::AssignOldestPendingRequesterToHolding()
+bool UCombatEngagementSlotComponent::AssignBestPendingRequesterToHolding()
 {
-	TArray<const FEngagementQueueEntry*> PendingEntries;
-	for (const FEngagementQueueEntry& Entry : EngagementQueue)
+	AActor* BestRequester = nullptr;
+	int32 BestHoldingSlotIndex = INDEX_NONE;
+	float BestPathScore = TNumericLimits<float>::Max();
+	uint64 BestSequence = TNumericLimits<uint64>::Max();
+	for (int32 HoldingSlotIndex = 0;
+		HoldingSlotIndex < HoldingReservations.Num();
+		++HoldingSlotIndex)
 	{
-		AActor* Requester = Entry.Requester.Get();
-		if (Requester && !IsRequesterReserved(Requester))
-		{
-			PendingEntries.Add(&Entry);
-		}
-	}
-	PendingEntries.Sort([](const FEngagementQueueEntry& Left, const FEngagementQueueEntry& Right)
-	{
-		return Left.Sequence < Right.Sequence;
-	});
-
-	for (const FEngagementQueueEntry* Entry : PendingEntries)
-	{
-		AActor* Requester = Entry ? Entry->Requester.Get() : nullptr;
-		if (Requester && TryReserveSlot(Requester, EBHCombatSlotType::Holding))
-		{
-			NotifyRequesterSlotChanged(Requester);
-			return true;
-		}
-	}
-	return false;
-}
-
-bool UCombatEngagementSlotComponent::FindOldestEligibleReservation(
-	const TArray<TWeakObjectPtr<AActor>>& Reservations,
-	EBHCombatSlotType SlotType,
-	int32& OutReservationIndex) const
-{
-	OutReservationIndex = INDEX_NONE;
-	uint64 OldestSequence = TNumericLimits<uint64>::Max();
-	for (int32 SlotIndex = 0; SlotIndex < Reservations.Num(); ++SlotIndex)
-	{
-		AActor* Requester = Reservations[SlotIndex].Get();
-		if (!Requester)
+		if (HoldingReservations[HoldingSlotIndex].IsValid())
 		{
 			continue;
 		}
 
-		FVector SlotLocation;
-		if (!GetSlotWorldLocation(SlotType, SlotIndex, SlotLocation)
-			|| FVector::DistSquared2D(Requester->GetActorLocation(), SlotLocation)
-				> FMath::Square(PromotionArrivalRadius))
+		FVector HoldingSlotLocation;
+		if (!GetSlotWorldLocation(
+			EBHCombatSlotType::Holding,
+			HoldingSlotIndex,
+			HoldingSlotLocation))
 		{
 			continue;
 		}
 
-		const uint64 Sequence = GetQueueSequence(Requester);
-		if (OutReservationIndex == INDEX_NONE || Sequence < OldestSequence)
+		for (const FEngagementQueueEntry& Entry : EngagementQueue)
 		{
-			OldestSequence = Sequence;
-			OutReservationIndex = SlotIndex;
+			AActor* Requester = Entry.Requester.Get();
+			if (!Requester || IsRequesterReserved(Requester))
+			{
+				continue;
+			}
+			if (IsCorridorFormationActive()
+				&& (!CorridorHoldingRowLayout.IsValidIndex(HoldingSlotIndex)
+					|| CorridorHoldingRowLayout[HoldingSlotIndex].SideIndex
+						!= GetCorridorSideIndex(Requester)))
+			{
+				continue;
+			}
+
+			float PathScore = 0.0f;
+			if (!GetNavigationPathScore(Requester, HoldingSlotLocation, PathScore))
+			{
+				continue;
+			}
+
+			const uint64 Sequence = GetQueueSequence(Requester);
+			const bool bBetterPath = PathScore + 1.0f < BestPathScore;
+			const bool bSamePathOlder = FMath::IsNearlyEqual(
+				PathScore,
+				BestPathScore,
+				1.0f) && Sequence < BestSequence;
+			if (!BestRequester || bBetterPath || bSamePathOlder)
+			{
+				BestRequester = Requester;
+				BestHoldingSlotIndex = HoldingSlotIndex;
+				BestPathScore = PathScore;
+				BestSequence = Sequence;
+			}
 		}
 	}
 
-	return OutReservationIndex != INDEX_NONE;
+	if (!BestRequester || !HoldingReservations.IsValidIndex(BestHoldingSlotIndex))
+	{
+		return false;
+	}
+	HoldingReservations[BestHoldingSlotIndex] = BestRequester;
+	NotifyRequesterSlotChanged(BestRequester);
+	return true;
 }
 
 bool UCombatEngagementSlotComponent::FindBestWaitAdmission(
@@ -4752,25 +4923,6 @@ bool UCombatEngagementSlotComponent::FindBestInitialAttackAssignment(
 	}
 
 	return OutRequester != nullptr && OutAttackSlotIndex != INDEX_NONE;
-}
-
-bool UCombatEngagementSlotComponent::FindOldestPendingRequester(AActor*& OutRequester) const
-{
-	OutRequester = nullptr;
-	uint64 OldestSequence = TNumericLimits<uint64>::Max();
-	for (const FEngagementQueueEntry& Entry : EngagementQueue)
-	{
-		AActor* Requester = Entry.Requester.Get();
-		if (!Requester || IsRequesterReserved(Requester) || Entry.Sequence >= OldestSequence)
-		{
-			continue;
-		}
-
-		OldestSequence = Entry.Sequence;
-		OutRequester = Requester;
-	}
-
-	return OutRequester != nullptr;
 }
 
 bool UCombatEngagementSlotComponent::FindPendingRequesterIndex(

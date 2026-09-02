@@ -39,6 +39,19 @@ enum class EBHCrowdAvoidanceQuality : uint8
 	High
 };
 
+/** Traffic role used to coordinate simultaneous formation movement. */
+UENUM(BlueprintType)
+enum class EBHFormationMovementRole : uint8
+{
+	None,
+	AttackIngress,
+	WaitIngress,
+	WaitIngressDeferred,
+	HoldingTransit,
+	StationaryHolding,
+	PendingTransit
+};
+
 /**
  * Server-authoritative controller for NavMesh enemy engagement.
  * Pursues the target directly outside combat range, then uses the shared
@@ -62,6 +75,9 @@ public:
 	ABHHeroCharacter* GetCurrentTarget() const { return CurrentTarget; }
 
 	EBHCombatSlotType GetCurrentCombatSlotType() const { return CurrentSlotType; }
+
+	UFUNCTION(BlueprintPure, Category = "AI|Formation")
+	EBHFormationMovementRole GetFormationMovementRole() const { return CurrentFormationMovementRole; }
 
 	float GetSlotAcceptanceRadius() const { return SlotAcceptanceRadius; }
 	bool IsEscapingCombatCore() const { return bEscapingCombatCore; }
@@ -129,6 +145,10 @@ protected:
 	/** Speed used during initial approach and when a joined enemy must catch up to a distant slot. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI|Movement Intent", meta = (ClampMin = "0.0", Units = "cm/s"))
 	float FormationCatchUpMoveSpeed = 500.0f;
+
+	/** Retry cadence while a Wait departure is held behind an active Attack ingress path. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI|Traffic Priority", meta = (ClampMin = "0.05", Units = "s"))
+	float WaitIngressDeferRetryInterval = 0.2f;
 
 	/** Lead a moving player by this much while outside formation. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI|Pursuit", meta = (ClampMin = "0.0", Units = "s"))
@@ -267,6 +287,8 @@ private:
 	int32 GetOverlapPriority(const ABHEnemy* Enemy) const;
 	bool ShouldPreserveQueuePosition(EBHCombatSlotReleaseReason Reason) const;
 	void RequestMoveToReservedSlot(const FVector& SlotLocation, float AcceptanceRadius);
+	void ScheduleWaitIngressRetry();
+	void ClearWaitIngressDeferral();
 	bool UpdateStuckTracking(float DistanceToSlot, float Speed);
 	void ResetStuckTracking();
 	void DrawDebugStatus(const ABHEnemy* ControlledEnemy) const;
@@ -288,6 +310,9 @@ private:
 	EBHCombatMoveRouteStage CurrentMoveRouteStage = EBHCombatMoveRouteStage::Direct;
 	EBHCombatMoveRouteStage LastRequestedRouteStage = EBHCombatMoveRouteStage::Direct;
 	bool bEscapingCombatCore = false;
+	EBHFormationMovementRole CurrentFormationMovementRole = EBHFormationMovementRole::None;
+	bool bWaitIngressDeferred = false;
+	TWeakObjectPtr<AActor> WaitIngressBlockingAttackRequester;
 
 	EBHCombatSlotType TrackedSlotType = EBHCombatSlotType::None;
 	int32 TrackedSlotIndex = INDEX_NONE;
@@ -319,4 +344,5 @@ private:
 	FAIRequestID OverlapRecoveryRequestID = FAIRequestID::InvalidRequest;
 
 	FTimerHandle TargetRefreshTimerHandle;
+	FTimerHandle WaitIngressRetryTimerHandle;
 };

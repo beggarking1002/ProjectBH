@@ -122,6 +122,7 @@ void ABHCrowdEnemyAIController::ApplyCrowdFollowingSettings()
 void ABHCrowdEnemyAIController::OnUnPossess()
 {
 	GetWorldTimerManager().ClearTimer(TargetRefreshTimerHandle);
+	ClearWaitIngressDeferral();
 	FinishOverlapRecovery(false);
 	ReleaseCurrentCombatSlot(EBHCombatSlotReleaseReason::UnPossessed);
 	StopMovement();
@@ -231,6 +232,7 @@ void ABHCrowdEnemyAIController::RefreshTargetAndMove()
 	// Each refresh starts from a non-running presentation intent. Only the
 	// concrete pursuit/Attack ingress paths below opt back into Run.
 	ControlledEnemy->SetWantsRunLocomotion(false);
+	CurrentFormationMovementRole = EBHFormationMovementRole::None;
 
 	if (bOverlapRecoveryActive)
 	{
@@ -455,6 +457,66 @@ void ABHCrowdEnemyAIController::RefreshTargetAndMove()
 	const float CurrentMoveSpeed = ControlledEnemy->GetVelocity().Size2D();
 	const bool bCanSettleAtReservedSlot = bAtReservedSlot
 		&& CurrentMoveSpeed <= FMath::Max(0.0f, SlotSettleSpeedThreshold);
+	if (!bAtReservedSlot)
+	{
+		switch (CurrentSlotType)
+		{
+		case EBHCombatSlotType::Attack:
+			CurrentFormationMovementRole = EBHFormationMovementRole::AttackIngress;
+			break;
+		case EBHCombatSlotType::Wait:
+			CurrentFormationMovementRole = EBHFormationMovementRole::WaitIngress;
+			break;
+		case EBHCombatSlotType::Holding:
+			CurrentFormationMovementRole = EBHFormationMovementRole::HoldingTransit;
+			break;
+		case EBHCombatSlotType::Pending:
+			CurrentFormationMovementRole = EBHFormationMovementRole::PendingTransit;
+			break;
+		case EBHCombatSlotType::None:
+		default:
+			break;
+		}
+	}
+	else if (CurrentSlotType == EBHCombatSlotType::Holding)
+	{
+		CurrentFormationMovementRole = EBHFormationMovementRole::StationaryHolding;
+	}
+
+	if (CurrentSlotType == EBHCombatSlotType::Wait && !bAtReservedSlot)
+	{
+		// Departure priority is evaluated only before a new Wait movement leg.
+		// An already moving Wait agent is never frozen in the middle of the choke.
+		if (!bHasRequestedSlotMove || bWaitIngressDeferred)
+		{
+			AActor* BlockingAttackRequester = nullptr;
+			if (CurrentSlotComponent->ShouldDeferWaitIngress(
+				GetPawn(),
+				MoveGoal,
+				BlockingAttackRequester))
+			{
+				CurrentFormationMovementRole = EBHFormationMovementRole::WaitIngressDeferred;
+				WaitIngressBlockingAttackRequester = BlockingAttackRequester;
+				if (!bWaitIngressDeferred)
+				{
+					StopMovement();
+				}
+				bWaitIngressDeferred = true;
+				bHasRequestedSlotMove = false;
+				ResetStuckTracking();
+				ControlledEnemy->SetFormationCatchUpRequired(false);
+				ApplyMovementIntent(ControlledEnemy, WaitMoveSpeed, true);
+				ScheduleWaitIngressRetry();
+				DrawDebugStatus(ControlledEnemy);
+				return;
+			}
+		}
+		ClearWaitIngressDeferral();
+	}
+	else
+	{
+		ClearWaitIngressDeferral();
+	}
 	if (bAtReservedSlot)
 	{
 		// Arrival, not reservation, ends the initial approach run. Keep this
@@ -961,6 +1023,8 @@ void ABHCrowdEnemyAIController::ReleaseCurrentCombatSlot(
 	CurrentMoveRouteStage = EBHCombatMoveRouteStage::Direct;
 	LastRequestedRouteStage = EBHCombatMoveRouteStage::Direct;
 	bEscapingCombatCore = false;
+	CurrentFormationMovementRole = EBHFormationMovementRole::None;
+	ClearWaitIngressDeferral();
 	LastRequestedSlotLocation = FVector::ZeroVector;
 	bHasRequestedSlotMove = false;
 	bForceSlotPathRefresh = false;
@@ -1404,6 +1468,32 @@ bool ABHCrowdEnemyAIController::ShouldPreserveQueuePosition(
 	}
 }
 
+void ABHCrowdEnemyAIController::ScheduleWaitIngressRetry()
+{
+	if (!GetWorld()
+		|| GetWorldTimerManager().IsTimerActive(WaitIngressRetryTimerHandle))
+	{
+		return;
+	}
+
+	GetWorldTimerManager().SetTimer(
+		WaitIngressRetryTimerHandle,
+		this,
+		&ThisClass::RefreshTargetAndMove,
+		FMath::Max(0.05f, WaitIngressDeferRetryInterval),
+		false);
+}
+
+void ABHCrowdEnemyAIController::ClearWaitIngressDeferral()
+{
+	if (GetWorld())
+	{
+		GetWorldTimerManager().ClearTimer(WaitIngressRetryTimerHandle);
+	}
+	bWaitIngressDeferred = false;
+	WaitIngressBlockingAttackRequester.Reset();
+}
+
 void ABHCrowdEnemyAIController::RequestMoveToReservedSlot(
 	const FVector& SlotLocation,
 	float AcceptanceRadius)
@@ -1526,6 +1616,8 @@ void ABHCrowdEnemyAIController::DrawDebugStatus(const ABHEnemy* ControlledEnemy)
 		static_cast<int64>(LastReleaseReason));
 	const FString RouteStageName = StaticEnum<EBHCombatMoveRouteStage>()->GetNameStringByValue(
 		static_cast<int64>(CurrentMoveRouteStage));
+	const FString TrafficRoleName = StaticEnum<EBHFormationMovementRole>()->GetNameStringByValue(
+		static_cast<int64>(CurrentFormationMovementRole));
 	const float CurrentTime = GetWorld()->GetTimeSeconds();
 	const float TargetHeldTime = IsValid(CurrentTarget)
 		? FMath::Max(0.0f, CurrentTime - TargetAcquiredTime)
@@ -1586,6 +1678,18 @@ void ABHCrowdEnemyAIController::DrawDebugStatus(const ABHEnemy* ControlledEnemy)
 			0,
 			2.0f);
 	}
+	else if (bWaitIngressDeferred && WaitIngressBlockingAttackRequester.IsValid())
+	{
+		DrawDebugLine(
+			GetWorld(),
+			ControlledEnemy->GetActorLocation(),
+			WaitIngressBlockingAttackRequester->GetActorLocation(),
+			FColor(255, 170, 0),
+			false,
+			ResolvedTargetRefreshInterval + 0.1f,
+			0,
+			3.0f);
+	}
 	else if (bHasRequestedSlotMove)
 	{
 		DrawDebugLine(
@@ -1634,7 +1738,7 @@ void ABHCrowdEnemyAIController::DrawDebugStatus(const ABHEnemy* ControlledEnemy)
 		? (ControlledEnemy->NeedsFormationCatchUp() ? TEXT("CatchUpRun") : TEXT("ApproachRun"))
 		: TEXT("Formation");
 	const FString DebugText = FString::Printf(
-		TEXT("%s/%s %.2fs | Target:%s Held:%.1f | %s[%d] Side:%d Lane:%d Seq:%llu Dist:%.0f Speed:%.1f Gait:%s Facing:%s Route:%s Overlap:%s Stuck:%.1f/%.1f Starts:%d | Reform:%s(%d) | Last:%s"),
+		TEXT("%s/%s %.2fs | Target:%s Held:%.1f | %s[%d] Side:%d Lane:%d Seq:%llu Dist:%.0f Speed:%.1f Gait:%s Facing:%s Route:%s Traffic:%s Overlap:%s Stuck:%.1f/%.1f Starts:%d | Reform:%s(%d) | Last:%s"),
 		*CombatStateName,
 		MovementMode,
 		ResolvedTargetRefreshInterval,
@@ -1650,6 +1754,7 @@ void ABHCrowdEnemyAIController::DrawDebugStatus(const ABHEnemy* ControlledEnemy)
 		GaitIntent,
 		FacingMode,
 		*RouteStageName,
+		*TrafficRoleName,
 		bOverlapRecoveryActive ? TEXT("Escape") : TEXT("None"),
 		StuckElapsed,
 		NoProgressElapsed,

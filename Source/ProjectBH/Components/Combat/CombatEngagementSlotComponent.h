@@ -86,6 +86,12 @@ public:
 		FVector& OutMoveGoal,
 		EBHCombatMoveRouteStage& OutRouteStage) const;
 
+	/** True when a new Wait movement leg would overlap an active Attack ingress path. */
+	bool ShouldDeferWaitIngress(
+		AActor* WaitRequester,
+		const FVector& WaitMoveGoal,
+		AActor*& OutBlockingAttackRequester) const;
+
 	/** Releases every slot owned by Requester and optionally preserves its central queue priority. */
 	void ReleaseSlot(AActor* Requester, bool bPreserveQueuePosition = false);
 
@@ -550,6 +556,22 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Engagement Admission", meta = (ClampMin = "0.0", Units = "cm"))
 	float AdmissionCongestionPenaltyPerAgent = 200.0f;
 
+	/** Gives a moving Attack owner departure priority over a conflicting Wait movement leg. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Traffic Priority")
+	bool bEnableAttackIngressPriority = true;
+
+	/** Extra clearance added to the two Enemy capsule radii when comparing movement path tubes. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Traffic Priority", meta = (ClampMin = "0.0", Units = "cm"))
+	float AttackIngressPathPadding = 20.0f;
+
+	/** An Attack owner this close to its final slot no longer owns the ingress traffic corridor. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Traffic Priority", meta = (ClampMin = "0.0", Units = "cm"))
+	float AttackIngressTrafficArrivalRadius = 55.0f;
+
+	/** Path segments separated by more than this height are treated as different traffic layers. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Traffic Priority", meta = (ClampMin = "0.0", Units = "cm"))
+	float AttackIngressTrafficHeightTolerance = 100.0f;
+
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Engagement Slots")
 	FVector NavProjectionExtent = FVector(50.0f, 50.0f, 200.0f);
 
@@ -724,15 +746,8 @@ private:
 	void NotifyAllReservedRequestersSlotChanged() const;
 	void RefreshPromotions();
 	bool PromoteBestWaitReservationToAttack(bool bAllowUnarrivedWait = false);
-	bool PromoteOldestReservation(
-		TArray<TWeakObjectPtr<AActor>>& SourceReservations,
-		EBHCombatSlotType SourceType,
-		EBHCombatSlotType DestinationType);
-	bool AssignOldestPendingRequesterToHolding();
-	bool FindOldestEligibleReservation(
-		const TArray<TWeakObjectPtr<AActor>>& Reservations,
-		EBHCombatSlotType SlotType,
-		int32& OutReservationIndex) const;
+	bool PromoteBestOuterRequesterToWait();
+	bool AssignBestPendingRequesterToHolding();
 	bool FindBestWaitAdmission(
 		int32& OutWaitSlotIndex,
 		int32& OutAttackSlotIndex,
@@ -744,7 +759,6 @@ private:
 	bool FindBestInitialAttackAssignment(
 		AActor*& OutRequester,
 		int32& OutAttackSlotIndex) const;
-	bool FindOldestPendingRequester(AActor*& OutRequester) const;
 	bool FindPendingRequesterIndex(AActor* Requester, int32& OutPendingIndex) const;
 	bool IsRequesterReserved(AActor* Requester) const;
 	bool HasAnyValidReservation(const TArray<TWeakObjectPtr<AActor>>& Reservations) const;
