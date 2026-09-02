@@ -25,6 +25,9 @@ void UBHEnemyAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 
 	CombatState = OwningEnemy->GetCombatState();
 	bIsChasing = CombatState == EBHEnemyCombatState::Chasing;
+	bUseMovingUpperBodyAttack = OwningEnemy->UsesMovingUpperBodyAttack()
+		&& (CombatState == EBHEnemyCombatState::Attacking
+			|| CombatState == EBHEnemyCombatState::Recovering);
 	bHasJoinedFormation = OwningEnemy->HasJoinedFormation();
 	bNeedsFormationCatchUp = OwningEnemy->NeedsFormationCatchUp();
 	bWantsRunLocomotion = OwningEnemy->WantsRunLocomotion();
@@ -76,7 +79,7 @@ void UBHEnemyAnimInstance::NativeThreadSafeUpdateAnimation(float DeltaSeconds)
 	{
 		bShouldMove = GroundSpeed >= EnterSpeed;
 	}
-	bShouldUseRunLocomotion = bIsChasing
+	bShouldUseRunLocomotion = (bIsChasing || bUseMovingUpperBodyAttack)
 		&& bShouldMove
 		&& bWantsRunLocomotion;
 

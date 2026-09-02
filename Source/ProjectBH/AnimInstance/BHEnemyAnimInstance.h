@@ -41,6 +41,10 @@ protected:
 	UPROPERTY(VisibleDefaultsOnly, BlueprintReadOnly, Category = "AnimData|Combat")
 	bool bIsChasing = true;
 
+	/** True while locomotion must remain the base pose beneath the attack montage. */
+	UPROPERTY(VisibleDefaultsOnly, BlueprintReadOnly, Category = "AnimData|Combat")
+	bool bUseMovingUpperBodyAttack = false;
+
 	/** True after the enemy physically reached a formation slot for its current engagement. */
 	UPROPERTY(VisibleDefaultsOnly, BlueprintReadOnly, Category = "AnimData|LocomotionData")
 	bool bHasJoinedFormation = false;

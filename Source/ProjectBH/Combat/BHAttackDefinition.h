@@ -45,9 +45,17 @@ struct PROJECTBH_API FBHAttackDefinitionRow : public FTableRowBase
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Hit")
 	EBHAttackHitDetectionMode HitDetectionMode = EBHAttackHitDetectionMode::CommittedTargetCone;
 
-	/** Distance at which pursuit stops and the enemy commits to the attack. */
+	/** Distance at which a settled enemy commits to a stationary full-body attack. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Hit", meta = (ClampMin = "0.0", Units = "cm"))
 	float AttackStartRange = 150.0f;
+
+	/** Allows the Attack-slot owner to attack while its locomotion path is still moving. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Moving Attack")
+	bool bAllowMovingAttack = false;
+
+	/** Earlier commitment range used only by a moving upper-body attack. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Moving Attack", meta = (ClampMin = "0.0", Units = "cm"))
+	float MovingAttackStartRange = 300.0f;
 
 	/** Maximum horizontal distance accepted by the prototype target-cone hit. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Hit|Target Cone", meta = (ClampMin = "0.0", Units = "cm"))

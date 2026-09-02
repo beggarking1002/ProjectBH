@@ -23,6 +23,14 @@ enum class EBHEnemyCombatState : uint8
 	Dead
 };
 
+/** Selects whether locomotion remains authoritative while an attack montage plays. */
+UENUM(BlueprintType)
+enum class EBHEnemyAttackPresentationMode : uint8
+{
+	StationaryFullBody,
+	MovingUpperBody
+};
+
 /**
  * Common network-ready base for combat enemies.
  *
@@ -42,7 +50,9 @@ public:
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
 	/** Starts one server-authoritative melee attack against a fixed target. */
-	bool TryStartBasicAttack(AActor* TargetActor);
+	bool TryStartBasicAttack(
+		AActor* TargetActor,
+		EBHEnemyAttackPresentationMode PresentationMode = EBHEnemyAttackPresentationMode::StationaryFullBody);
 
 	/** Called by BH Enemy Attack Hit notify. Damage validation and application run on the server only. */
 	void PerformBasicAttackHit();
@@ -52,6 +62,15 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "Combat|Enemy")
 	bool IsAttackLocked() const { return CombatState != EBHEnemyCombatState::Chasing; }
+
+	/** True while an upper-body attack or its recovery is allowed to keep following the AI path. */
+	UFUNCTION(BlueprintPure, Category = "Combat|Enemy")
+	bool CanMoveDuringAttack() const;
+
+	/** AnimGraph gate for locomotion plus an UpperBody Slot overlay. */
+	UFUNCTION(BlueprintPure, Category = "Combat|Enemy")
+	bool UsesMovingUpperBodyAttack() const;
+	EBHEnemyAttackPresentationMode GetAttackPresentationMode() const { return ActiveAttackPresentationMode; }
 
 	UFUNCTION(BlueprintPure, Category = "Combat|Enemy")
 	bool IsDead() const { return CombatState == EBHEnemyCombatState::Dead; }
@@ -82,6 +101,12 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "Combat|Enemy")
 	float GetAttackStartRange() const;
+
+	UFUNCTION(BlueprintPure, Category = "Combat|Enemy")
+	float GetMovingAttackStartRange() const;
+
+	UFUNCTION(BlueprintPure, Category = "Combat|Enemy")
+	bool IsMovingAttackEnabled() const;
 
 	UFUNCTION(BlueprintPure, Category = "Combat|Enemy|Size")
 	EBHEnemySizeClass GetEnemySizeClass() const;
@@ -141,7 +166,10 @@ private:
 	void OnRep_PoolInWorld();
 
 	UFUNCTION(NetMulticast, Reliable)
-	void MulticastPlayBasicAttack(UAnimMontage* AttackMontage, FName MontageSection);
+	void MulticastPlayBasicAttack(
+		UAnimMontage* AttackMontage,
+		FName MontageSection,
+		EBHEnemyAttackPresentationMode PresentationMode);
 
 	UFUNCTION(NetMulticast, Reliable)
 	void MulticastPlayReaction(UAnimMontage* ReactionMontage);
@@ -176,6 +204,9 @@ private:
 
 	UPROPERTY(Replicated, VisibleInstanceOnly, BlueprintReadOnly, Category = "Combat|Enemy", meta = (AllowPrivateAccess = "true"))
 	EBHEnemyCombatState CombatState = EBHEnemyCombatState::Chasing;
+
+	UPROPERTY(Replicated, VisibleInstanceOnly, BlueprintReadOnly, Category = "Combat|Enemy", meta = (AllowPrivateAccess = "true"))
+	EBHEnemyAttackPresentationMode ActiveAttackPresentationMode = EBHEnemyAttackPresentationMode::StationaryFullBody;
 
 	/**
 	 * Latched on the first physical arrival at a reserved Attack/Wait/Holding/Pending slot.

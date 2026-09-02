@@ -351,7 +351,7 @@ void ABHCrowdEnemyAIController::RefreshTargetAndMove()
 		}
 	}
 
-	if (ControlledEnemy->IsAttackLocked())
+	if (ControlledEnemy->IsAttackLocked() && !ControlledEnemy->CanMoveDuringAttack())
 	{
 		if (ControlledEnemy->GetCombatState() == EBHEnemyCombatState::Recovering
 			&& CurrentSlotType == EBHCombatSlotType::Attack
@@ -396,7 +396,9 @@ void ABHCrowdEnemyAIController::RefreshTargetAndMove()
 		return;
 	}
 
-	ABHHeroCharacter* SelectedHero = SelectTargetHero();
+	ABHHeroCharacter* SelectedHero = ControlledEnemy->CanMoveDuringAttack()
+		? CurrentTarget.Get()
+		: SelectTargetHero();
 	const bool bTargetChanged = SelectedHero != CurrentTarget;
 	if (bTargetChanged)
 	{
@@ -476,7 +478,10 @@ void ABHCrowdEnemyAIController::RefreshTargetAndMove()
 			ReleaseCurrentCombatSlot(EBHCombatSlotReleaseReason::LeftEngagementRange);
 		}
 		ControlledEnemy->SetWantsRunLocomotion(true);
-		ApplyMovementIntent(ControlledEnemy, PursuitSpeed, false);
+		ApplyMovementIntent(
+			ControlledEnemy,
+			PursuitSpeed,
+			ControlledEnemy->CanMoveDuringAttack());
 		RequestPursuitMove(ControlledEnemy);
 		DrawDebugStatus(ControlledEnemy);
 		return;
@@ -504,6 +509,7 @@ void ABHCrowdEnemyAIController::RefreshTargetAndMove()
 			bUseInitialRun ? PursuitSpeed : GetCurrentSlotMoveSpeed(ControlledEnemy),
 			true);
 		RequestPursuitMove(ControlledEnemy, InitialChargeStopRadius);
+		TryStartMovingAttack(ControlledEnemy, DistanceToTarget);
 		DrawDebugStatus(ControlledEnemy);
 		return;
 	}
@@ -633,12 +639,24 @@ void ABHCrowdEnemyAIController::RefreshTargetAndMove()
 		UpdateFormationCatchUpIntent(ControlledEnemy, DistanceToSlot);
 	}
 	const bool bUseRunForCurrentSlot = CurrentSlotType == EBHCombatSlotType::Attack
-		&& (!ControlledEnemy->HasJoinedFormation()
+		&& (ControlledEnemy->CanMoveDuringAttack()
+			|| !ControlledEnemy->HasJoinedFormation()
 			|| ControlledEnemy->NeedsFormationCatchUp());
 	ControlledEnemy->SetWantsRunLocomotion(bUseRunForCurrentSlot);
+	if (CurrentSlotType == EBHCombatSlotType::Attack && !bAtReservedSlot)
+	{
+		TryStartMovingAttack(ControlledEnemy, DistanceToTarget);
+	}
 	if (CurrentSlotType == EBHCombatSlotType::Attack && bAtReservedSlot)
 	{
 		ApplyMovementIntent(ControlledEnemy, AttackIngressSpeed, true);
+		if (ControlledEnemy->CanMoveDuringAttack())
+		{
+			// Do not issue the old attack-lock StopMovement while a moving attack
+			// naturally finishes its final approach to the slot.
+			DrawDebugStatus(ControlledEnemy);
+			return;
+		}
 		if (!bCanSettleAtReservedSlot)
 		{
 			// Do not replace the completed path with another zero-length request.
@@ -691,7 +709,8 @@ void ABHCrowdEnemyAIController::RefreshTargetAndMove()
 		GetCurrentSlotMoveSpeed(ControlledEnemy),
 		true);
 
-	const bool bMovementStalled = bHasRequestedSlotMove
+	const bool bMovementStalled = !ControlledEnemy->IsAttackLocked()
+		&& bHasRequestedSlotMove
 		&& UpdateStuckTracking(DistanceToMoveGoal, ControlledEnemy->GetVelocity().Size2D());
 	const float CurrentTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
 	const bool bCanRequestHoldingYield = CurrentSlotType == EBHCombatSlotType::Attack
@@ -737,6 +756,7 @@ void ABHCrowdEnemyAIController::RefreshTargetAndMove()
 		RequestMoveToReservedSlot(
 			MoveGoal,
 			bUsesRingWaypoint ? RingWaypointAcceptanceRadius : SlotAcceptanceRadius);
+		TryStartMovingAttack(ControlledEnemy, DistanceToTarget);
 	}
 
 	DrawDebugStatus(ControlledEnemy);
@@ -999,11 +1019,39 @@ void ABHCrowdEnemyAIController::ApplyMovementIntent(
 	}
 }
 
+bool ABHCrowdEnemyAIController::TryStartMovingAttack(
+	ABHEnemy* ControlledEnemy,
+	float DistanceToTarget)
+{
+	if (!ControlledEnemy
+		|| !IsValid(CurrentTarget)
+		|| CurrentSlotType != EBHCombatSlotType::Attack
+		|| bEscapingCombatCore
+		|| ControlledEnemy->IsAttackLocked()
+		|| !ControlledEnemy->IsMovingAttackEnabled()
+		|| DistanceToTarget > ControlledEnemy->GetMovingAttackStartRange()
+		|| GetMoveStatus() != EPathFollowingStatus::Moving)
+	{
+		return false;
+	}
+
+	const bool bStarted = ControlledEnemy->TryStartBasicAttack(
+		CurrentTarget,
+		EBHEnemyAttackPresentationMode::MovingUpperBody);
+	if (bStarted)
+	{
+		ControlledEnemy->SetWantsRunLocomotion(true);
+		ApplyMovementIntent(ControlledEnemy, AttackIngressSpeed, true);
+	}
+	return bStarted;
+}
+
 float ABHCrowdEnemyAIController::GetCurrentSlotMoveSpeed(const ABHEnemy* ControlledEnemy) const
 {
 	if (CurrentSlotType == EBHCombatSlotType::Attack
 		&& ControlledEnemy
-		&& (!ControlledEnemy->HasJoinedFormation() || ControlledEnemy->NeedsFormationCatchUp()))
+		&& (!ControlledEnemy->HasJoinedFormation()
+			|| ControlledEnemy->NeedsFormationCatchUp()))
 	{
 		return FormationCatchUpMoveSpeed;
 	}
@@ -1823,6 +1871,8 @@ void ABHCrowdEnemyAIController::DrawDebugStatus(const ABHEnemy* ControlledEnemy)
 		static_cast<int64>(CurrentMoveRouteStage));
 	const FString TrafficRoleName = StaticEnum<EBHFormationMovementRole>()->GetNameStringByValue(
 		static_cast<int64>(CurrentFormationMovementRole));
+	const FString AttackModeName = StaticEnum<EBHEnemyAttackPresentationMode>()->GetNameStringByValue(
+		static_cast<int64>(ControlledEnemy->GetAttackPresentationMode()));
 	const float CurrentTime = GetWorld()->GetTimeSeconds();
 	const float TargetHeldTime = IsValid(CurrentTarget)
 		? FMath::Max(0.0f, CurrentTime - TargetAcquiredTime)
@@ -1965,7 +2015,7 @@ void ABHCrowdEnemyAIController::DrawDebugStatus(const ABHEnemy* ControlledEnemy)
 		? (ControlledEnemy->NeedsFormationCatchUp() ? TEXT("CatchUpRun") : TEXT("ApproachRun"))
 		: TEXT("Formation");
 	const FString DebugText = FString::Printf(
-		TEXT("%s/%s %.2fs | Target:%s Held:%.1f | %s[%d] Side:%d Lane:%d Seq:%llu Dist:%.0f Speed:%.1f Gait:%s Facing:%s Route:%s Traffic:%s Overlap:%s Stuck:%.1f/%.1f Starts:%d | Reform:%s(%d) | Last:%s"),
+		TEXT("%s/%s %.2fs | Target:%s Held:%.1f | %s[%d] Side:%d Lane:%d Seq:%llu Dist:%.0f Speed:%.1f Gait:%s Facing:%s Route:%s Traffic:%s Attack:%s Overlap:%s Stuck:%.1f/%.1f Starts:%d | Reform:%s(%d) | Last:%s"),
 		*CombatStateName,
 		MovementMode,
 		ResolvedTargetRefreshInterval,
@@ -1982,6 +2032,7 @@ void ABHCrowdEnemyAIController::DrawDebugStatus(const ABHEnemy* ControlledEnemy)
 		FacingMode,
 		*RouteStageName,
 		*TrafficRoleName,
+		*AttackModeName,
 		bOverlapRecoveryActive ? TEXT("Escape") : TEXT("None"),
 		StuckElapsed,
 		NoProgressElapsed,

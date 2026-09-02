@@ -3453,7 +3453,8 @@ bool UCombatEngagementSlotComponent::ShouldDeferWaitIngress(
 		const ABHEnemy* AttackEnemy = Cast<ABHEnemy>(AttackRequester);
 		if (!AttackEnemy
 			|| AttackRequester == WaitRequester
-			|| AttackEnemy->GetCombatState() != EBHEnemyCombatState::Chasing)
+			|| (AttackEnemy->GetCombatState() != EBHEnemyCombatState::Chasing
+				&& !AttackEnemy->CanMoveDuringAttack()))
 		{
 			continue;
 		}

@@ -300,6 +300,7 @@ private:
 	bool AcquireCombatSlot(ABHEnemy* ControlledEnemy);
 	void RequestPursuitMove(ABHEnemy* ControlledEnemy, float AcceptanceRadius = 75.0f);
 	void ApplyMovementIntent(ABHEnemy* ControlledEnemy, float MoveSpeed, bool bFaceTarget);
+	bool TryStartMovingAttack(ABHEnemy* ControlledEnemy, float DistanceToTarget);
 	float GetCurrentSlotMoveSpeed(const ABHEnemy* ControlledEnemy) const;
 	void UpdateFormationCatchUpIntent(ABHEnemy* ControlledEnemy, float DistanceToSlot) const;
 	float GetCurrentSlotRepathDistance() const;

@@ -79,6 +79,7 @@ void ABHEnemy::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetime
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 
 	DOREPLIFETIME(ABHEnemy, CombatState);
+	DOREPLIFETIME(ABHEnemy, ActiveAttackPresentationMode);
 	DOREPLIFETIME(ABHEnemy, bHasJoinedFormation);
 	DOREPLIFETIME(ABHEnemy, bNeedsFormationCatchUp);
 	DOREPLIFETIME(ABHEnemy, bWantsRunLocomotion);
@@ -200,7 +201,21 @@ void ABHEnemy::OnRep_PoolInWorld()
 	ApplyPoolPresentationState(bIsPoolInWorld);
 }
 
-bool ABHEnemy::TryStartBasicAttack(AActor* TargetActor)
+bool ABHEnemy::CanMoveDuringAttack() const
+{
+	return UsesMovingUpperBodyAttack()
+		&& (CombatState == EBHEnemyCombatState::Attacking
+			|| CombatState == EBHEnemyCombatState::Recovering);
+}
+
+bool ABHEnemy::UsesMovingUpperBodyAttack() const
+{
+	return ActiveAttackPresentationMode == EBHEnemyAttackPresentationMode::MovingUpperBody;
+}
+
+bool ABHEnemy::TryStartBasicAttack(
+	AActor* TargetActor,
+	EBHEnemyAttackPresentationMode PresentationMode)
 {
 	if (!HasAuthority() || IsAttackLocked() || !IsValid(TargetActor))
 	{
@@ -228,11 +243,19 @@ bool ABHEnemy::TryStartBasicAttack(AActor* TargetActor)
 		}
 		return false;
 	}
+	if (PresentationMode == EBHEnemyAttackPresentationMode::MovingUpperBody
+		&& (!AttackDefinition->bAllowMovingAttack
+			|| FVector::DistSquared2D(GetActorLocation(), TargetActor->GetActorLocation())
+				> FMath::Square(FMath::Max(0.0f, AttackDefinition->MovingAttackStartRange))))
+	{
+		return false;
+	}
 
 	bLoggedInvalidAttackConfig = false;
 	GetWorldTimerManager().ClearTimer(AttackRecoveryTimerHandle);
 	GetWorldTimerManager().ClearTimer(AttackMontageFailSafeTimerHandle);
 	AttackTarget = TargetActor;
+	ActiveAttackPresentationMode = PresentationMode;
 	ActiveAttackId = AttackConfig->AttackId;
 	ActiveAttackMontage = AttackConfig->Montage;
 	ActiveAttackMontageSection = SelectRandomMontageSection(*AttackConfig);
@@ -257,14 +280,21 @@ bool ABHEnemy::TryStartBasicAttack(AActor* TargetActor)
 		}
 	}
 
-	MulticastPlayBasicAttack(ActiveAttackMontage, ActiveAttackMontageSection);
+	MulticastPlayBasicAttack(
+		ActiveAttackMontage,
+		ActiveAttackMontageSection,
+		ActiveAttackPresentationMode);
 	return true;
 }
 
-void ABHEnemy::MulticastPlayBasicAttack_Implementation(UAnimMontage* AttackMontage, FName MontageSection)
+void ABHEnemy::MulticastPlayBasicAttack_Implementation(
+	UAnimMontage* AttackMontage,
+	FName MontageSection,
+	EBHEnemyAttackPresentationMode PresentationMode)
 {
 	ActiveAttackMontage = AttackMontage;
 	ActiveAttackMontageSection = MontageSection;
+	ActiveAttackPresentationMode = PresentationMode;
 	const float MontageDuration = PlayAnimMontage(ActiveAttackMontage, 1.0f, ActiveAttackMontageSection);
 	if (!HasAuthority())
 	{
@@ -687,6 +717,7 @@ void ABHEnemy::ClearAttackContext()
 	ActiveAttackMontage = nullptr;
 	ActiveAttackId = NAME_None;
 	ActiveAttackMontageSection = NAME_None;
+	ActiveAttackPresentationMode = EBHEnemyAttackPresentationMode::StationaryFullBody;
 	bHasAppliedDamageThisAttack = false;
 }
 
@@ -724,6 +755,22 @@ float ABHEnemy::GetAttackStartRange() const
 	const FBHEnemyAttackConfig* AttackConfig = GetDefaultAttackConfig();
 	const FBHAttackDefinitionRow* AttackDefinition = AttackConfig ? GetAttackDefinition(*AttackConfig) : nullptr;
 	return AttackDefinition ? AttackDefinition->AttackStartRange : 150.0f;
+}
+
+float ABHEnemy::GetMovingAttackStartRange() const
+{
+	const FBHEnemyAttackConfig* AttackConfig = GetDefaultAttackConfig();
+	const FBHAttackDefinitionRow* AttackDefinition = AttackConfig ? GetAttackDefinition(*AttackConfig) : nullptr;
+	return AttackDefinition
+		? FMath::Max(0.0f, AttackDefinition->MovingAttackStartRange)
+		: 0.0f;
+}
+
+bool ABHEnemy::IsMovingAttackEnabled() const
+{
+	const FBHEnemyAttackConfig* AttackConfig = GetDefaultAttackConfig();
+	const FBHAttackDefinitionRow* AttackDefinition = AttackConfig ? GetAttackDefinition(*AttackConfig) : nullptr;
+	return AttackDefinition && AttackDefinition->bAllowMovingAttack;
 }
 
 EBHEnemySizeClass ABHEnemy::GetEnemySizeClass() const
