@@ -16,6 +16,7 @@
 #include "Animation/AnimInstance.h"
 #include "Animation/AnimMontage.h"
 #include "Components/CapsuleComponent.h"
+#include "Components/StaticMeshComponent.h"
 #include "GameFramework/Controller.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameplayEffect.h"
@@ -34,6 +35,11 @@ ABHEnemy::ABHEnemy()
 	GetCharacterMovement()->bUseControllerDesiredRotation = true;
 	ConfigureLiveCollision();
 
+	EquippedWeaponMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("EquippedWeaponMesh"));
+	EquippedWeaponMesh->SetupAttachment(GetMesh(), TEXT("WeaponSocket_R"));
+	EquippedWeaponMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	EquippedWeaponMesh->SetGenerateOverlapEvents(false);
+
 }
 
 void ABHEnemy::BeginPlay()
@@ -41,6 +47,14 @@ void ABHEnemy::BeginPlay()
 	Super::BeginPlay();
 	ConfigureLiveCollision();
 	ApplyEnemyConfigRuntimeSettings();
+	if (HasAuthority() && (!IsPoolManaged() || bIsPoolInWorld))
+	{
+		SelectAndEquipRandomWeapon();
+	}
+	else if (!HasAuthority())
+	{
+		ApplySelectedWeapon();
+	}
 
 	if (HasAuthority() && GetBHAbilitySystemComponent())
 	{
@@ -85,6 +99,7 @@ void ABHEnemy::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetime
 	DOREPLIFETIME(ABHEnemy, bWantsRunLocomotion);
 	DOREPLIFETIME(ABHEnemy, bIsPoolInWorld);
 	DOREPLIFETIME(ABHEnemy, PoolManager);
+	DOREPLIFETIME(ABHEnemy, SelectedWeaponIndex);
 }
 
 void ABHEnemy::MarkFormationJoined()
@@ -151,6 +166,7 @@ bool ABHEnemy::ActivateFromPool(const FTransform& SpawnTransform)
 	SetActorTransform(SpawnTransform, false, nullptr, ETeleportType::TeleportPhysics);
 	ResetGameplayStateForPoolActivation();
 	ApplyEnemyConfigRuntimeSettings();
+	SelectAndEquipRandomWeapon();
 	SetCombatState(EBHEnemyCombatState::Chasing);
 	bIsPoolInWorld = true;
 	ApplyPoolPresentationState(true);
@@ -199,6 +215,11 @@ void ABHEnemy::DeactivateToPoolStorage(const FTransform& StorageTransform)
 void ABHEnemy::OnRep_PoolInWorld()
 {
 	ApplyPoolPresentationState(bIsPoolInWorld);
+}
+
+void ABHEnemy::OnRep_SelectedWeaponIndex()
+{
+	ApplySelectedWeapon();
 }
 
 bool ABHEnemy::CanMoveDuringAttack() const
@@ -709,6 +730,85 @@ void ABHEnemy::ResetGameplayStateForPoolActivation()
 		AbilitySystem->SetNumericAttributeBase(UBHAttributeSet::GetMaxHealthAttribute(), MaxHealth);
 	}
 	AbilitySystem->SetNumericAttributeBase(UBHAttributeSet::GetHealthAttribute(), MaxHealth);
+}
+
+void ABHEnemy::SelectAndEquipRandomWeapon()
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+
+	SelectedWeaponIndex = INDEX_NONE;
+	if (EnemyConfigDataAsset)
+	{
+		float TotalWeight = 0.0f;
+		for (const FBHEnemyWeaponOption& Option : EnemyConfigDataAsset->WeaponOptions)
+		{
+			if (IsValid(Option.WeaponMesh))
+			{
+				TotalWeight += FMath::Max(0.0f, Option.SelectionWeight);
+			}
+		}
+
+		if (TotalWeight > UE_SMALL_NUMBER)
+		{
+			float RemainingWeight = FMath::FRandRange(0.0f, TotalWeight);
+			for (int32 OptionIndex = 0; OptionIndex < EnemyConfigDataAsset->WeaponOptions.Num(); ++OptionIndex)
+			{
+				const FBHEnemyWeaponOption& Option = EnemyConfigDataAsset->WeaponOptions[OptionIndex];
+				if (!IsValid(Option.WeaponMesh) || Option.SelectionWeight <= 0.0f)
+				{
+					continue;
+				}
+
+				SelectedWeaponIndex = OptionIndex;
+				RemainingWeight -= Option.SelectionWeight;
+				if (RemainingWeight <= 0.0f)
+				{
+					break;
+				}
+			}
+		}
+	}
+
+	ApplySelectedWeapon();
+	ForceNetUpdate();
+}
+
+void ABHEnemy::ApplySelectedWeapon()
+{
+	if (!EquippedWeaponMesh)
+	{
+		return;
+	}
+
+	EquippedWeaponMesh->SetStaticMesh(nullptr);
+	EquippedWeaponMesh->SetRelativeTransform(FTransform::Identity);
+	if (!EnemyConfigDataAsset
+		|| !EnemyConfigDataAsset->WeaponOptions.IsValidIndex(SelectedWeaponIndex))
+	{
+		return;
+	}
+
+	const FBHEnemyWeaponOption& Option = EnemyConfigDataAsset->WeaponOptions[SelectedWeaponIndex];
+	if (!IsValid(Option.WeaponMesh) || Option.SelectionWeight <= 0.0f)
+	{
+		return;
+	}
+
+	const FName SocketName = EnemyConfigDataAsset->WeaponSocketName.IsNone()
+		? FName(TEXT("WeaponSocket_R"))
+		: EnemyConfigDataAsset->WeaponSocketName;
+	if (USkeletalMeshComponent* CharacterMesh = GetMesh())
+	{
+		EquippedWeaponMesh->AttachToComponent(
+			CharacterMesh,
+			FAttachmentTransformRules::SnapToTargetNotIncludingScale,
+			SocketName);
+	}
+	EquippedWeaponMesh->SetStaticMesh(Option.WeaponMesh);
+	EquippedWeaponMesh->SetRelativeTransform(Option.RelativeTransform);
 }
 
 void ABHEnemy::ClearAttackContext()

@@ -8,6 +8,7 @@
 #include "BHEnemy.generated.h"
 
 class UAnimMontage;
+class UStaticMeshComponent;
 class ABHEnemyPoolManager;
 struct FOnAttributeChangeData;
 struct FBHAttackDefinitionRow;
@@ -135,6 +136,9 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Enemy Pool")
 	bool IsPoolManaged() const;
 
+	UFUNCTION(BlueprintPure, Category = "Equipment")
+	UStaticMeshComponent* GetEquippedWeaponMeshComponent() const { return EquippedWeaponMesh; }
+
 	/** Configures a deferred-spawned enemy as hidden pool reserve before BeginPlay. */
 	void InitializeForPool(ABHEnemyPoolManager* InPoolManager);
 
@@ -165,6 +169,9 @@ private:
 	UFUNCTION()
 	void OnRep_PoolInWorld();
 
+	UFUNCTION()
+	void OnRep_SelectedWeaponIndex();
+
 	UFUNCTION(NetMulticast, Reliable)
 	void MulticastPlayBasicAttack(
 		UAnimMontage* AttackMontage,
@@ -193,6 +200,8 @@ private:
 	void ApplyPoolPresentationState(bool bActive);
 	void DestroyCurrentAIController();
 	void ResetGameplayStateForPoolActivation();
+	void SelectAndEquipRandomWeapon();
+	void ApplySelectedWeapon();
 	void ClearAttackContext();
 	bool IsAttackTargetInHitArea() const;
 	const FBHEnemyAttackConfig* GetAttackConfig(FName AttackId) const;
@@ -229,6 +238,14 @@ private:
 
 	UPROPERTY(Replicated, Transient)
 	TObjectPtr<ABHEnemyPoolManager> PoolManager;
+
+	/** Cosmetic only. Damage is still defined by the active attack definition. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Equipment", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<UStaticMeshComponent> EquippedWeaponMesh;
+
+	/** Index into EnemyConfigDataAsset.WeaponOptions, selected only by the authority. */
+	UPROPERTY(ReplicatedUsing = OnRep_SelectedWeaponIndex, VisibleInstanceOnly, BlueprintReadOnly, Category = "Equipment", meta = (AllowPrivateAccess = "true"))
+	int32 SelectedWeaponIndex = INDEX_NONE;
 
 	/** Frozen for one attack so a target switch cannot redirect a hit already in progress. */
 	UPROPERTY(Transient)

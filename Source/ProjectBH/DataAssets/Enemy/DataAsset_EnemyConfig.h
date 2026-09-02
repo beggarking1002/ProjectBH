@@ -9,6 +9,7 @@
 
 class UAnimMontage;
 class UGameplayEffect;
+class UStaticMesh;
 
 /** Coarse body-size policy consumed by navigation and engagement slots. */
 UENUM(BlueprintType)
@@ -42,6 +43,24 @@ struct PROJECTBH_API FBHEnemyAttackConfig
 	TSubclassOf<UGameplayEffect> DamageEffect;
 };
 
+/** One cosmetic weapon candidate that can be selected when an enemy enters the world. */
+USTRUCT(BlueprintType)
+struct PROJECTBH_API FBHEnemyWeaponOption
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly)
+	TObjectPtr<UStaticMesh> WeaponMesh;
+
+	/** Relative selection weight. Zero disables this entry without removing it. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, meta = (ClampMin = "0.0"))
+	float SelectionWeight = 1.0f;
+
+	/** Per-mesh correction applied after attaching to WeaponSocketName. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly)
+	FTransform RelativeTransform = FTransform::Identity;
+};
+
 /** Per-enemy movement settings and mappings from attack IDs to animation/effect assets. */
 UCLASS(BlueprintType)
 class PROJECTBH_API UDataAsset_EnemyConfig : public UDataAsset
@@ -63,6 +82,14 @@ public:
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Movement", meta = (ClampMin = "0.0", Units = "cm/s"))
 	float MaxWalkSpeed = 300.0f;
+
+	/** Socket on the character mesh used by every cosmetic weapon option. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Equipment")
+	FName WeaponSocketName = TEXT("WeaponSocket_R");
+
+	/** Server selects one valid entry whenever this enemy spawns or is reactivated from its pool. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Equipment", meta = (TitleProperty = "WeaponMesh"))
+	TArray<FBHEnemyWeaponOption> WeaponOptions;
 
 	/** Capacity consumed from the currently active Attack row. Normal enemies use one; Large enemies normally use two. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Engagement", meta = (ClampMin = "1", UIMin = "1"))
