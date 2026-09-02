@@ -188,6 +188,35 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI|Pursuit", meta = (ClampMin = "1.0", Units = "cm"))
 	float PursuitRepathDistance = 100.0f;
 
+	/** Gives pure-pursuit enemies stable lane/row goals instead of one shared player goal. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI|Pursuit|Distribution")
+	bool bEnableDistributedPursuitGoals = true;
+
+	/** Number of lateral pursuit lanes. Even counts are also centered around the target axis. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI|Pursuit|Distribution", meta = (ClampMin = "1", UIMin = "1", UIMax = "7"))
+	int32 PursuitLaneCount = 3;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI|Pursuit|Distribution", meta = (ClampMin = "0.0", Units = "cm"))
+	float PursuitLaneSpacing = 120.0f;
+
+	/** Number of staggered rows behind the predicted player position. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI|Pursuit|Distribution", meta = (ClampMin = "1", UIMin = "1", UIMax = "8"))
+	int32 PursuitRowCount = 4;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI|Pursuit|Distribution", meta = (ClampMin = "0.0", Units = "cm"))
+	float PursuitFirstRowDistance = 80.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI|Pursuit|Distribution", meta = (ClampMin = "0.0", Units = "cm"))
+	float PursuitRowSpacing = 130.0f;
+
+	/** Below this target speed, each enemy preserves its own approach side instead of using player facing. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI|Pursuit|Distribution", meta = (ClampMin = "0.0", Units = "cm/s"))
+	float PursuitDirectionSpeedThreshold = 80.0f;
+
+	/** Per-refresh smoothing for abrupt left/right reversals of the pursuit formation axis. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI|Pursuit|Distribution", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float PursuitDirectionBlendAlpha = 0.35f;
+
 	/** Initial candidates charge to the formation edge without overrunning the player. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI|Pursuit", meta = (ClampMin = "0.0", Units = "cm"))
 	float InitialChargeStopRadius = 450.0f;
@@ -377,6 +406,10 @@ private:
 	bool bInEngagementFormation = false;
 	bool bHasRequestedPursuitMove = false;
 	FVector LastRequestedPursuitLocation = FVector::ZeroVector;
+	uint32 PursuitDistributionSeed = 0;
+	FVector SmoothedPursuitForward = FVector::ZeroVector;
+	int32 ActivePursuitLaneIndex = INDEX_NONE;
+	int32 ActivePursuitRowIndex = INDEX_NONE;
 	float ResolvedTargetRefreshInterval = 0.5f;
 	bool bSlotAssignmentRefreshQueued = false;
 	bool bOverlapRecoveryActive = false;

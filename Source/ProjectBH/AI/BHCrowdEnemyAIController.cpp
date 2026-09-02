@@ -50,6 +50,12 @@ void ABHCrowdEnemyAIController::OnPossess(APawn* InPawn)
 	{
 		ControlledEnemy->ResetFormationJoinState();
 	}
+	PursuitDistributionSeed = InPawn
+		? static_cast<uint32>(InPawn->GetUniqueID())
+		: static_cast<uint32>(GetUniqueID());
+	SmoothedPursuitForward = FVector::ZeroVector;
+	ActivePursuitLaneIndex = INDEX_NONE;
+	ActivePursuitRowIndex = INDEX_NONE;
 
 	ApplyCrowdFollowingSettings();
 	FRandomStream RefreshRandom(InPawn ? InPawn->GetUniqueID() : GetUniqueID());
@@ -935,13 +941,75 @@ void ABHCrowdEnemyAIController::RequestPursuitMove(
 		return;
 	}
 
-	FVector PursuitGoal = CurrentTarget->GetActorLocation()
+	const FVector PredictedTargetLocation = CurrentTarget->GetActorLocation()
 		+ CurrentTarget->GetVelocity() * FMath::Max(0.0f, PursuitPredictionTime);
+	FVector PursuitGoal = PredictedTargetLocation;
+	const bool bUseDistributedGoal = bEnableDistributedPursuitGoals && !bInEngagementFormation;
+	if (bUseDistributedGoal)
+	{
+		const int32 ResolvedLaneCount = FMath::Max(1, PursuitLaneCount);
+		const int32 ResolvedRowCount = FMath::Max(1, PursuitRowCount);
+		ActivePursuitLaneIndex = static_cast<int32>(PursuitDistributionSeed % static_cast<uint32>(ResolvedLaneCount));
+		ActivePursuitRowIndex = static_cast<int32>(
+			(PursuitDistributionSeed / static_cast<uint32>(ResolvedLaneCount))
+			% static_cast<uint32>(ResolvedRowCount));
+
+		FVector DesiredForward = CurrentTarget->GetVelocity().GetSafeNormal2D();
+		if (CurrentTarget->GetVelocity().SizeSquared2D()
+			< FMath::Square(FMath::Max(0.0f, PursuitDirectionSpeedThreshold)))
+		{
+			// A stationary target has no meaningful travel axis. Preserve this
+			// enemy's existing approach side instead of making the whole crowd
+			// rotate to the player's facing direction.
+			DesiredForward = (CurrentTarget->GetActorLocation() - ControlledEnemy->GetActorLocation()).GetSafeNormal2D();
+		}
+		if (DesiredForward.IsNearlyZero())
+		{
+			DesiredForward = ControlledEnemy->GetActorForwardVector().GetSafeNormal2D();
+		}
+
+		if (SmoothedPursuitForward.IsNearlyZero())
+		{
+			SmoothedPursuitForward = DesiredForward;
+		}
+		else
+		{
+			const float DirectionBlendAlpha = FMath::Clamp(PursuitDirectionBlendAlpha, 0.0f, 1.0f);
+			const FVector BlendedForward = FMath::Lerp(
+				SmoothedPursuitForward,
+				DesiredForward,
+				DirectionBlendAlpha).GetSafeNormal2D();
+			SmoothedPursuitForward = BlendedForward.IsNearlyZero()
+				? DesiredForward
+				: BlendedForward;
+		}
+
+		const FVector PursuitRight(-SmoothedPursuitForward.Y, SmoothedPursuitForward.X, 0.0f);
+		const float CenteredLane = static_cast<float>(ActivePursuitLaneIndex)
+			- (static_cast<float>(ResolvedLaneCount) - 1.0f) * 0.5f;
+		const float RowDistance = FMath::Max(0.0f, PursuitFirstRowDistance)
+			+ static_cast<float>(ActivePursuitRowIndex) * FMath::Max(0.0f, PursuitRowSpacing);
+		PursuitGoal += PursuitRight * CenteredLane * FMath::Max(0.0f, PursuitLaneSpacing)
+			- SmoothedPursuitForward * RowDistance;
+	}
+	else
+	{
+		ActivePursuitLaneIndex = INDEX_NONE;
+		ActivePursuitRowIndex = INDEX_NONE;
+	}
+
 	if (const UNavigationSystemV1* NavigationSystem = FNavigationSystem::GetCurrent<UNavigationSystemV1>(GetWorld()))
 	{
 		FNavLocation ProjectedGoal;
 		if (NavigationSystem->ProjectPointToNavigation(PursuitGoal, ProjectedGoal, TargetNavProjectionExtent))
 		{
+			PursuitGoal = ProjectedGoal.Location;
+		}
+		else if (bUseDistributedGoal
+			&& NavigationSystem->ProjectPointToNavigation(PredictedTargetLocation, ProjectedGoal, TargetNavProjectionExtent))
+		{
+			// A lane may temporarily fall outside the NavMesh beside a wall. Fall
+			// back to the reachable center prediction rather than issuing a bad move.
 			PursuitGoal = ProjectedGoal.Location;
 		}
 	}
@@ -1132,6 +1200,9 @@ void ABHCrowdEnemyAIController::ResetPursuitTracking()
 {
 	bHasRequestedPursuitMove = false;
 	LastRequestedPursuitLocation = FVector::ZeroVector;
+	SmoothedPursuitForward = FVector::ZeroVector;
+	ActivePursuitLaneIndex = INDEX_NONE;
+	ActivePursuitRowIndex = INDEX_NONE;
 }
 
 void ABHCrowdEnemyAIController::ReleaseCurrentCombatSlot(

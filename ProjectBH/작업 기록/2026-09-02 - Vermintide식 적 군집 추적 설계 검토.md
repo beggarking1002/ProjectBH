@@ -1,0 +1,87 @@
+# 2026-09-02 - Vermintide식 적 군집 추적 설계 검토
+
+## 공개 정보의 한계
+
+Fatshark가 Vermintide 2의 일반 적 군집 회피 알고리즘 전체를 공개한 자료는 확인하지 못했다. 따라서 “Vermintide 2가 정확히 어떤 알고리즘을 쓴다”는 단정은 하지 않는다.
+
+공식 봇 개발 블로그에는 플레이어의 속도/방향으로 미래 위치를 추정하고, 여러 추적점을 분산 배정해 불필요한 재경로 탐색을 줄인다고 설명돼 있다. 이는 군집 적에도 적용 가능한 목표 분산 원칙의 근거다.
+
+## 군집이 꼬이지 않는 핵심 구조
+
+군집은 단일 기능이 아니라 아래 층의 결합이다.
+
+1. **전역 경로**: NavMesh가 벽·계단·큰 장애물을 피해 목표 지역까지의 경로 회랑을 정한다.
+2. **목표 분산**: 모든 적이 플레이어 Capsule 중심 한 점으로 `MoveTo`하지 않는다. 플레이어 주위 공격 고리의 서로 다른 슬롯, 또는 추적 오프셋을 목표로 배정한다.
+3. **국소 조향/회피**: 가까운 동료의 속도와 위치를 보고 매 프레임 희망 속도를 좌·우로 조정한다. 충돌 후 물리적으로 서로 밀어내는 방식이 아니다.
+4. **공격 슬롯**: 실제 근접 공격 권한은 1~2개 슬롯에만 준다. 나머지는 2열 고리에서 전진 기회를 기다리므로 목표점에 수십 명이 겹치지 않는다.
+5. **설계상 완화**: 적-적 Capsule 충돌은 강한 Block 대신 별도 채널의 Overlap/약한 분리를 사용한다. 시각 Mesh의 부피보다 작은 Nav Agent 반경, 다른 경로 오프셋도 허용한다.
+6. **성능 예산**: 경로를 Tick마다 다시 계산하지 않는다. 같은 무리의 목표/경로 회랑을 재사용하고, 목표 변경·막힘·일정 시간에만 갱신한다.
+
+## UE5 적용 방침
+
+### 1단계: 최소 몬스터
+
+- 지금은 한 적의 추적·공격·피해·사망부터 완료한다. Crowd 기능은 아직 넣지 않는다.
+
+### 2단계: 8~20마리 군집 시험
+
+- `AAIController`의 일반 PathFollowingComponent를 `UCrowdFollowingComponent`로 교체한 Crowd AI Controller를 만든다.
+- UE Detour Crowd를 사용한다. 이는 NavMesh 경로 회랑과 적응형 RVO 샘플링으로 동적 Agent 회피를 수행한다.
+- `CharacterMovement`의 RVO Avoidance와 Detour Crowd는 둘 중 하나만 쓴다. 이 프로젝트의 NavMesh 적에는 Detour Crowd를 우선 선택한다.
+- Project Settings > Crowd Manager에서 `Max Agents`, `Max Agent Radius`, `Max Avoided Agents`, `Separation Weight`, `Path Offset Radius Multiplier`를 실제 Horde 수에 맞춰 조정한다.
+
+### 3단계: 공격 고리
+
+- 플레이어 중심이 아닌 `플레이어 위치 + 고리 방향 × 공격 거리`를 적별 MoveTo 목적지로 사용한다.
+- 가장 가까운 1~2개 슬롯만 공격 상태로 전환한다.
+- 막힌 Agent는 다음 프레임에 모든 적이 재탐색하지 않고, 짧은 지연 뒤 인접 슬롯/2열 슬롯으로 교체한다.
+
+### 충돌 규칙
+
+- `Pawn` 전체를 Overlap으로 바꾸지 않는다. 플레이어·적·투사체를 구분하는 Custom Object Channel을 먼저 만든다.
+- Enemy끼리만 Overlap 또는 약한 분리를 적용하고, 플레이어 공격/피격 판정은 별도 Trace Channel 또는 Hitbox로 유지한다.
+
+## 검증 장면
+
+1. 넓은 평지에서 적 12마리가 한 플레이어를 추적한다.
+2. 좁은 복도에서 적 12마리가 추적한다.
+3. 선두 2명만 공격하고, 후속 적은 대기 고리에서 순환하는지 확인한다.
+4. 30초 동안 정지·진동·무한 재경로·Capsule 겹침이 없는지 기록한다.
+
+## 대형 적 슬롯 규칙
+
+카오스 워리어 같은 대형 적은 소형 적과 같은 단일 슬롯 규칙을 쓰지 않는다. Vermintide의 정확한 내부 수치는 공개되지 않았으므로 아래는 ProjectBH의 적용 설계다.
+
+| 항목 | 소형 적 | 대형 적 |
+| --- | --- | --- |
+| 점유 | 공격 슬롯 1개 | 자신의 Capsule 반경·무기 궤적·회전 여유를 포함한 넓은 점유 부채꼴 또는 인접 슬롯 묶음 |
+| 공격 권한 | 소형 공격 토큰을 공유 | Heavy 공격 토큰을 별도 사용, 일반 적과 동시 타격 수를 제한 |
+| 우선순위 | 대형 적 접근 시 인접 슬롯을 비움 | 소형 적보다 높은 경로/슬롯 우선순위 |
+| 군집 회피 | 같은 크기끼리 대칭 회피 | 소형 적은 대형 적을 강하게 회피, 대형 적은 소형 적에게 과도하게 양보하지 않음 |
+| 경로 | 일반 폭의 통로 허용 | 자신 Agent Radius와 회전 반경에 맞는 넓은 통로만 선호 |
+
+### 구체적 규칙
+
+1. 대형 적이 공격 고리 슬롯을 확보하면, 해당 방향의 인접 소형 슬롯을 잠근다. 소형 적은 2열 또는 다른 각도로 재배치한다.
+2. 슬롯 반지름은 `대형 Capsule 반경 + 무기 Sweep 최대 반경 + 안전 여유`로 계산한다. Mesh 크기가 아니라 실제 Capsule과 공격 판정을 기준으로 잡는다.
+3. 대형 적의 긴 준비/회전/공격 중에는 슬롯을 유지한다. 소형 적이 같은 공간으로 진입하면 진동과 피격 불일치가 생긴다.
+4. 대형 적도 무제한 우선순위를 받지는 않는다. 좁은 문에서 장시간 막히면 소형 적에 길을 잠시 양보하거나 목표 슬롯을 재배정하는 타임아웃을 둔다.
+5. UE Detour Crowd를 쓸 때 소형/대형을 Avoidance Group으로 나누고, 소형은 대형 그룹을 회피하도록 한다. 대형의 Agent Radius가 Crowd Manager의 `Max Agent Radius`보다 작아야 한다.
+
+## 참고
+
+- Fatshark 공식 봇 개발 블로그: 예측 플레이어 위치와 분산 follow point.
+- Unreal Engine 공식 문서: Navigation Avoidance의 RVO/Detour Crowd 비교, Detour Crowd의 NavMesh 기반 회피와 설정 항목.
+
+## Nav Link Jump Down 비활성화
+
+자동으로 생성된 아래 방향 Nav Link만 끄는 절차다.
+
+1. 레벨 Outliner에서 `RecastNavMesh-Default`를 선택한다. 안 보이면 Viewport의 NavMesh를 한 번 표시(`P`)한 뒤 Outliner 검색으로 찾는다.
+2. Details에서 `Nav Link Jump Down Config`를 펼친다.
+3. `Enabled`를 끈다.
+4. NavMesh를 다시 빌드한다. 정적 NavMesh라면 `Build > Build Paths`, 런타임 동적 생성이라면 갱신 뒤 `P`로 결과를 확인한다.
+
+`Generation > Generate Nav Links`를 끄면 Jump Down뿐 아니라 모든 자동 Nav Link 생성이 꺼진다. Jump Down만 제외하려면 위 Config의 `Enabled`만 끈다.
+
+레벨에 사람이 직접 둔 `NavLinkProxy`라면 이 설정의 대상이 아니다. Outliner에서 해당 `NavLinkProxy` Actor를 삭제하거나 Point/Smart Link 자체를 비활성화해야 한다.
