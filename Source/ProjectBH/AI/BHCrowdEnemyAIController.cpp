@@ -170,6 +170,7 @@ void ABHCrowdEnemyAIController::OnMoveCompleted(FAIRequestID RequestID, const FP
 		bHasRequestedPursuitMove = false;
 		if (Result.Code == EPathFollowingResult::Success)
 		{
+			ResetPursuitStuckWatchdog();
 			ResetStuckTracking();
 		}
 		return;
@@ -488,6 +489,15 @@ void ABHCrowdEnemyAIController::RefreshTargetAndMove()
 			ControlledEnemy,
 			PursuitSpeed,
 			ControlledEnemy->CanMoveDuringAttack());
+		if (UpdatePursuitStuckWatchdog(ControlledEnemy))
+		{
+			// Refresh both the path corridor and pursuit axis. The stable lane/row
+			// identity remains unchanged; only the stale route is discarded.
+			StopMovement();
+			bHasRequestedPursuitMove = false;
+			LastRequestedPursuitLocation = FVector::ZeroVector;
+			SmoothedPursuitForward = FVector::ZeroVector;
+		}
 		RequestPursuitMove(ControlledEnemy);
 		DrawDebugStatus(ControlledEnemy);
 		return;
@@ -568,11 +578,17 @@ void ABHCrowdEnemyAIController::RefreshTargetAndMove()
 	// slot while still inside the player core. Settling by final-slot distance at
 	// that point would stop the escape forever and keep the old global promotion
 	// gate active.
+	const float EffectiveArrivalRadius = CurrentSlotType == EBHCombatSlotType::Wait
+		? FMath::Max(SlotAcceptanceRadius, WaitSlotArrivalRadius)
+		: SlotAcceptanceRadius;
 	const bool bAtReservedSlot = !IsIntermediateCombatRouteStage(CurrentMoveRouteStage)
-		&& DistanceToSlotSquared <= FMath::Square(SlotAcceptanceRadius);
+		&& DistanceToSlotSquared <= FMath::Square(FMath::Max(0.0f, EffectiveArrivalRadius));
 	const float CurrentMoveSpeed = ControlledEnemy->GetVelocity().Size2D();
+	const float EffectiveSettleSpeedThreshold = CurrentSlotType == EBHCombatSlotType::Wait
+		? FMath::Max(SlotSettleSpeedThreshold, WaitSlotSettleSpeedThreshold)
+		: SlotSettleSpeedThreshold;
 	const bool bCanSettleAtReservedSlot = bAtReservedSlot
-		&& CurrentMoveSpeed <= FMath::Max(0.0f, SlotSettleSpeedThreshold);
+		&& CurrentMoveSpeed <= FMath::Max(0.0f, EffectiveSettleSpeedThreshold);
 	if (!bAtReservedSlot)
 	{
 		switch (CurrentSlotType)
@@ -761,7 +777,11 @@ void ABHCrowdEnemyAIController::RefreshTargetAndMove()
 			|| CurrentMoveRouteStage == EBHCombatMoveRouteStage::BypassCoreNegative;
 		RequestMoveToReservedSlot(
 			MoveGoal,
-			bUsesRingWaypoint ? RingWaypointAcceptanceRadius : SlotAcceptanceRadius);
+			bUsesRingWaypoint
+				? RingWaypointAcceptanceRadius
+				: (CurrentSlotType == EBHCombatSlotType::Wait
+					? FMath::Max(SlotAcceptanceRadius, WaitSlotArrivalRadius)
+					: SlotAcceptanceRadius));
 		TryStartMovingAttack(ControlledEnemy, DistanceToTarget);
 	}
 
@@ -1196,6 +1216,72 @@ float ABHCrowdEnemyAIController::GetCurrentSlotRepathDistance() const
 	}
 }
 
+bool ABHCrowdEnemyAIController::UpdatePursuitStuckWatchdog(const ABHEnemy* ControlledEnemy)
+{
+	if (!bEnablePursuitStuckWatchdog || !ControlledEnemy || !GetWorld())
+	{
+		ResetPursuitStuckWatchdog();
+		return false;
+	}
+
+	const float CurrentTime = GetWorld()->GetTimeSeconds();
+	if (CurrentTime < PursuitWatchdogCooldownUntil)
+	{
+		return false;
+	}
+	if (!bHasRequestedPursuitMove || GetMoveStatus() != EPathFollowingStatus::Moving)
+	{
+		PursuitWatchdogReferenceLocation = ControlledEnemy->GetActorLocation();
+		PursuitWatchdogNoProgressElapsed = 0.0f;
+		bHasPursuitWatchdogSample = false;
+		return false;
+	}
+
+	const FVector CurrentLocation = ControlledEnemy->GetActorLocation();
+	if (!bHasPursuitWatchdogSample)
+	{
+		PursuitWatchdogReferenceLocation = CurrentLocation;
+		PursuitWatchdogNoProgressElapsed = 0.0f;
+		bHasPursuitWatchdogSample = true;
+		return false;
+	}
+
+	if (FVector::DistSquared2D(PursuitWatchdogReferenceLocation, CurrentLocation)
+		>= FMath::Square(FMath::Max(1.0f, PursuitWatchdogProgressDistance)))
+	{
+		PursuitWatchdogReferenceLocation = CurrentLocation;
+		PursuitWatchdogNoProgressElapsed = 0.0f;
+		return false;
+	}
+
+	PursuitWatchdogNoProgressElapsed += ResolvedTargetRefreshInterval;
+	if (PursuitWatchdogNoProgressElapsed < FMath::Max(0.1f, PursuitStuckWatchdogTimeout))
+	{
+		return false;
+	}
+
+	PursuitWatchdogReferenceLocation = CurrentLocation;
+	PursuitWatchdogNoProgressElapsed = 0.0f;
+	bHasPursuitWatchdogSample = false;
+	PursuitWatchdogCooldownUntil = CurrentTime + FMath::Max(0.0f, PursuitWatchdogCooldown);
+	++PursuitWatchdogRecoveryCount;
+	UE_LOG(
+		LogProjectBH,
+		Verbose,
+		TEXT("%s pursuit watchdog is refreshing a no-progress route (recovery %d)."),
+		*GetName(),
+		PursuitWatchdogRecoveryCount);
+	return true;
+}
+
+void ABHCrowdEnemyAIController::ResetPursuitStuckWatchdog()
+{
+	PursuitWatchdogReferenceLocation = FVector::ZeroVector;
+	PursuitWatchdogNoProgressElapsed = 0.0f;
+	PursuitWatchdogCooldownUntil = 0.0f;
+	bHasPursuitWatchdogSample = false;
+}
+
 void ABHCrowdEnemyAIController::ResetPursuitTracking()
 {
 	bHasRequestedPursuitMove = false;
@@ -1203,6 +1289,7 @@ void ABHCrowdEnemyAIController::ResetPursuitTracking()
 	SmoothedPursuitForward = FVector::ZeroVector;
 	ActivePursuitLaneIndex = INDEX_NONE;
 	ActivePursuitRowIndex = INDEX_NONE;
+	ResetPursuitStuckWatchdog();
 }
 
 void ABHCrowdEnemyAIController::ReleaseCurrentCombatSlot(
@@ -2086,7 +2173,7 @@ void ABHCrowdEnemyAIController::DrawDebugStatus(const ABHEnemy* ControlledEnemy)
 		? (ControlledEnemy->NeedsFormationCatchUp() ? TEXT("CatchUpRun") : TEXT("ApproachRun"))
 		: TEXT("Formation");
 	const FString DebugText = FString::Printf(
-		TEXT("%s/%s %.2fs | Target:%s Held:%.1f | %s[%d] Side:%d Lane:%d Seq:%llu Dist:%.0f Speed:%.1f Gait:%s Facing:%s Route:%s Traffic:%s Attack:%s Overlap:%s Stuck:%.1f/%.1f Starts:%d | Reform:%s(%d) | Last:%s"),
+		TEXT("%s/%s %.2fs | Target:%s Held:%.1f | %s[%d] Side:%d Lane:%d Seq:%llu Dist:%.0f Speed:%.1f Gait:%s Facing:%s Route:%s Traffic:%s Attack:%s Overlap:%s Stuck:%.1f/%.1f PWatch:%.1f/%d Starts:%d | Reform:%s(%d) | Last:%s"),
 		*CombatStateName,
 		MovementMode,
 		ResolvedTargetRefreshInterval,
@@ -2107,6 +2194,8 @@ void ABHCrowdEnemyAIController::DrawDebugStatus(const ABHEnemy* ControlledEnemy)
 		bOverlapRecoveryActive ? TEXT("Escape") : TEXT("None"),
 		StuckElapsed,
 		NoProgressElapsed,
+		PursuitWatchdogNoProgressElapsed,
+		PursuitWatchdogRecoveryCount,
 		ControlledEnemy->GetSuccessfulAttackStartCount(),
 		bIsReforming ? TEXT("Yes") : TEXT("No"),
 		ReformCount,

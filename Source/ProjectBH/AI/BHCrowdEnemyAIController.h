@@ -239,6 +239,14 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI|Engagement Slots", meta = (ClampMin = "0.0", Units = "cm/s"))
 	float SlotSettleSpeedThreshold = 5.0f;
 
+	/** Wait occupants may settle slightly short instead of shuffling the final few centimeters. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI|Engagement Slots", meta = (ClampMin = "0.0", Units = "cm"))
+	float WaitSlotArrivalRadius = 50.0f;
+
+	/** Wait-only settle speed; intentionally looser than the precise Attack-slot threshold. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI|Engagement Slots", meta = (ClampMin = "0.0", Units = "cm/s"))
+	float WaitSlotSettleSpeedThreshold = 80.0f;
+
 	/** Tight acceptance used for ring-alignment waypoints before inward ingress. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI|Engagement Slots", meta = (ClampMin = "0.0", Units = "cm"))
 	float RingWaypointAcceptanceRadius = 30.0f;
@@ -279,6 +287,21 @@ protected:
 	/** A recovering Attack owner farther than this from its slot yields immediately. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI|Recovery", meta = (ClampMin = "0.0", Units = "cm"))
 	float RecoveringAttackSlotLeashDistance = 60.0f;
+
+	/** Reissues a fresh pure-pursuit path when path following says Moving but the actor does not advance. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI|Recovery|Pursuit")
+	bool bEnablePursuitStuckWatchdog = true;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI|Recovery|Pursuit", meta = (ClampMin = "0.1", Units = "s"))
+	float PursuitStuckWatchdogTimeout = 2.0f;
+
+	/** Actor displacement that proves the current pursuit route is still making progress. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI|Recovery|Pursuit", meta = (ClampMin = "1.0", Units = "cm"))
+	float PursuitWatchdogProgressDistance = 50.0f;
+
+	/** Prevents repeated path resets while a congested choke needs time to clear. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI|Recovery|Pursuit", meta = (ClampMin = "0.0", Units = "s"))
+	float PursuitWatchdogCooldown = 1.0f;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI|Recovery", meta = (ClampMin = "0.0", Units = "cm"))
 	float StuckProgressDistance = 20.0f;
@@ -333,6 +356,8 @@ private:
 	float GetCurrentSlotMoveSpeed(const ABHEnemy* ControlledEnemy) const;
 	void UpdateFormationCatchUpIntent(ABHEnemy* ControlledEnemy, float DistanceToSlot) const;
 	float GetCurrentSlotRepathDistance() const;
+	bool UpdatePursuitStuckWatchdog(const ABHEnemy* ControlledEnemy);
+	void ResetPursuitStuckWatchdog();
 	void ResetPursuitTracking();
 	void ReleaseCurrentCombatSlot(EBHCombatSlotReleaseReason Reason, bool bTemporarilyExcludeReleasedSlot = false);
 	void RecoverStalledCombatSlot(ABHEnemy* ControlledEnemy);
@@ -410,6 +435,11 @@ private:
 	FVector SmoothedPursuitForward = FVector::ZeroVector;
 	int32 ActivePursuitLaneIndex = INDEX_NONE;
 	int32 ActivePursuitRowIndex = INDEX_NONE;
+	FVector PursuitWatchdogReferenceLocation = FVector::ZeroVector;
+	float PursuitWatchdogNoProgressElapsed = 0.0f;
+	float PursuitWatchdogCooldownUntil = 0.0f;
+	bool bHasPursuitWatchdogSample = false;
+	int32 PursuitWatchdogRecoveryCount = 0;
 	float ResolvedTargetRefreshInterval = 0.5f;
 	bool bSlotAssignmentRefreshQueued = false;
 	bool bOverlapRecoveryActive = false;
