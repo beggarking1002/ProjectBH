@@ -3,6 +3,9 @@
 #include "CombatEngagementSlotComponent.h"
 
 #include "../../AI/BHCrowdEnemyAIController.h"
+#include "../../AI/Navigation/BHNavigationQuery.h"
+#include "../../Combat/Engagement/BHCombatSpaceClassificationPolicy.h"
+#include "../../Combat/Engagement/BHLargeEnemyEngagementPolicy.h"
 #include "../../Debug/BHDebugDraw.h"
 #include "../../BHHeroCharacter.h"
 #include "../../Enemies/BHEnemy.h"
@@ -67,6 +70,8 @@ void UCombatEngagementSlotComponent::TickComponent(float DeltaTime, ELevelTick T
 	RefreshCorridorRowLayout(DeltaTime);
 	RefreshInitialFormationPhase();
 	UpdateAttackVacancyTimers(DeltaTime);
+	EnsureLargeEnemyAttackPriority();
+	ReconcileLargeEnemyExclusionWedges();
 	if (!IsInitialFormationActive())
 	{
 		RefreshCoreIntrusionHandover(DeltaTime);
@@ -74,6 +79,8 @@ void UCombatEngagementSlotComponent::TickComponent(float DeltaTime, ELevelTick T
 		RefreshFastAttackHandovers(DeltaTime);
 	}
 	TryReformFormation();
+	EnsureLargeEnemyAttackPriority();
+	ReconcileLargeEnemyExclusionWedges();
 	if (!BHDebugDraw::IsSlotsEnabled(bDrawDebugSlots))
 	{
 		return;
@@ -452,82 +459,42 @@ void UCombatEngagementSlotComponent::AnalyzeCombatSpace(float SampleDeltaTime)
 	bHasValidSpaceAnalysis = true;
 	SpaceAnalysisInvalidGraceRemaining = FMath::Max(0.0f, SpaceAnalysisInvalidGraceDuration);
 
-	const float EnterWidth = FMath::Max(0.0f, CorridorEnterMaxWidth);
-	const float ExitWidth = FMath::Max(EnterWidth, CorridorExitMinWidth);
-	const float EnterRatio = FMath::Max(1.0f, CorridorEnterAspectRatio);
-	const float ExitRatio = FMath::Clamp(CorridorExitAspectRatio, 1.0f, EnterRatio);
-	const bool bCorridorEvidence = EstimatedCorridorAxisLength >= CorridorMinimumAxisLength
-		&& EstimatedCorridorWidth <= EnterWidth
-		&& EstimatedCorridorAspectRatio >= EnterRatio;
-	const bool bOpenEvidence = EstimatedCorridorAxisLength < CorridorMinimumAxisLength
-		|| EstimatedCorridorWidth >= ExitWidth
-		|| EstimatedCorridorAspectRatio <= ExitRatio;
-	const bool bCorridorExitShapeEvidence = EstimatedCorridorAxisLength >= CorridorMinimumAxisLength
-		&& EstimatedCorridorWidth < ExitWidth
-		&& EstimatedCorridorAspectRatio > ExitRatio;
-	const float RequiredPocketBlockedFraction = CurrentSpaceMode == EBHCombatSpaceMode::Pocket
-		? FMath::Clamp(PocketExitBlockedFraction, 0.0f, 1.0f)
-		: FMath::Clamp(PocketEnterBlockedFraction, 0.0f, 1.0f);
-	const float RequiredPocketOpenArc = CurrentSpaceMode == EBHCombatSpaceMode::Pocket
-		? FMath::Clamp(PocketExitMinimumOpenArc, 0.0f, 360.0f)
-		: FMath::Clamp(PocketEnterMinimumOpenArc, 0.0f, 360.0f);
-	const bool bPocketEvidence = EstimatedPocketBlockedFraction >= RequiredPocketBlockedFraction
-		&& EstimatedPocketOpenArc >= RequiredPocketOpenArc;
-	const bool bUseCorridorEdgeExitThreshold = CurrentSpaceMode == EBHCombatSpaceMode::Pocket
-		&& bCorridorEdgePocketActive;
-	const float RequiredCorridorEdgeDistance = bUseCorridorEdgeExitThreshold
-		? FMath::Max(0.0f, PocketCorridorEdgeExitDistance)
-		: FMath::Max(0.0f, PocketCorridorEdgeEnterDistance);
-	const float RequiredCorridorEdgeClearanceDifference = bUseCorridorEdgeExitThreshold
-		? FMath::Max(0.0f, PocketCorridorEdgeExitClearanceDifference)
-		: FMath::Max(0.0f, PocketCorridorEdgeEnterClearanceDifference);
-	const bool bHasCorridorEdgeContext = CurrentSpaceMode == EBHCombatSpaceMode::Corridor
-		|| bCorridorEdgePocketActive;
-	const bool bCorridorEdgePocketEvidence = bHasCorridorEdgeContext
-		&& EstimatedCorridorEdgeNearDistance <= RequiredCorridorEdgeDistance
-		&& EstimatedCorridorEdgeClearanceDifference
-			>= RequiredCorridorEdgeClearanceDifference;
-	if (CurrentSpaceMode == EBHCombatSpaceMode::Corridor)
-	{
-		bCorridorEdgePocketActive = bCorridorEdgePocketEvidence;
-	}
-	else if (CurrentSpaceMode != EBHCombatSpaceMode::Pocket
-		|| (bCorridorEdgePocketActive && !bCorridorEdgePocketEvidence))
-	{
-		bCorridorEdgePocketActive = false;
-	}
-	const bool bCenteredCorridorRecovery = CurrentSpaceMode == EBHCombatSpaceMode::Pocket
-		&& bCorridorExitShapeEvidence
-		&& !bCorridorEdgePocketEvidence;
+	FBHCombatSpaceClassificationInput ClassificationInput;
+	ClassificationInput.CurrentMode = CurrentSpaceMode;
+	ClassificationInput.bCorridorMouthDetected = bCorridorMouthDetected;
+	ClassificationInput.bCorridorEdgePocketActive = bCorridorEdgePocketActive;
+	ClassificationInput.CorridorAxisLength = EstimatedCorridorAxisLength;
+	ClassificationInput.CorridorWidth = EstimatedCorridorWidth;
+	ClassificationInput.CorridorAspectRatio = EstimatedCorridorAspectRatio;
+	ClassificationInput.CorridorEdgeNearDistance = EstimatedCorridorEdgeNearDistance;
+	ClassificationInput.CorridorEdgeClearanceDifference =
+		EstimatedCorridorEdgeClearanceDifference;
+	ClassificationInput.PocketBlockedFraction = EstimatedPocketBlockedFraction;
+	ClassificationInput.PocketOpenArc = EstimatedPocketOpenArc;
+	ClassificationInput.CorridorMinimumAxisLength = CorridorMinimumAxisLength;
+	ClassificationInput.CorridorEnterMaxWidth = CorridorEnterMaxWidth;
+	ClassificationInput.CorridorExitMinWidth = CorridorExitMinWidth;
+	ClassificationInput.CorridorEnterAspectRatio = CorridorEnterAspectRatio;
+	ClassificationInput.CorridorExitAspectRatio = CorridorExitAspectRatio;
+	ClassificationInput.CorridorEnterDuration = CorridorEnterDuration;
+	ClassificationInput.CorridorExitDuration = CorridorExitDuration;
+	ClassificationInput.PocketEnterBlockedFraction = PocketEnterBlockedFraction;
+	ClassificationInput.PocketExitBlockedFraction = PocketExitBlockedFraction;
+	ClassificationInput.PocketEnterMinimumOpenArc = PocketEnterMinimumOpenArc;
+	ClassificationInput.PocketExitMinimumOpenArc = PocketExitMinimumOpenArc;
+	ClassificationInput.PocketCorridorEdgeEnterDistance = PocketCorridorEdgeEnterDistance;
+	ClassificationInput.PocketCorridorEdgeExitDistance = PocketCorridorEdgeExitDistance;
+	ClassificationInput.PocketCorridorEdgeEnterClearanceDifference =
+		PocketCorridorEdgeEnterClearanceDifference;
+	ClassificationInput.PocketCorridorEdgeExitClearanceDifference =
+		PocketCorridorEdgeExitClearanceDifference;
+	ClassificationInput.PocketEnterDuration = PocketEnterDuration;
+	ClassificationInput.PocketExitDuration = PocketExitDuration;
 
-	if (CurrentSpaceMode == EBHCombatSpaceMode::Corridor
-		&& bCorridorMouthDetected)
-	{
-		// MouthMixed is a Corridor layout sub-state. Do not collapse the entire
-		// formation into the open/pocket side while the target straddles a mouth.
-		CandidateSpaceMode = EBHCombatSpaceMode::Corridor;
-	}
-	else if (bCorridorEdgePocketEvidence)
-	{
-		CandidateSpaceMode = EBHCombatSpaceMode::Pocket;
-	}
-	else if (bCorridorEvidence || bCenteredCorridorRecovery)
-	{
-		CandidateSpaceMode = EBHCombatSpaceMode::Corridor;
-	}
-	else if (bPocketEvidence)
-	{
-		CandidateSpaceMode = EBHCombatSpaceMode::Pocket;
-	}
-	else if (bOpenEvidence)
-	{
-		CandidateSpaceMode = EBHCombatSpaceMode::Open;
-	}
-	else
-	{
-		// The gap between enter/exit thresholds is an intentional hysteresis band.
-		CandidateSpaceMode = CurrentSpaceMode;
-	}
+	const FBHCombatSpaceClassificationResult Classification =
+		FBHCombatSpaceClassificationPolicy::Evaluate(ClassificationInput);
+	CandidateSpaceMode = Classification.CandidateMode;
+	bCorridorEdgePocketActive = Classification.bCorridorEdgePocketActive;
 
 	if (CandidateSpaceMode == CurrentSpaceMode)
 	{
@@ -538,26 +505,7 @@ void UCombatEngagementSlotComponent::AnalyzeCombatSpace(float SampleDeltaTime)
 	}
 
 	SpaceModeTransitionElapsed += SampleDeltaTime;
-	float RequiredDuration = FMath::Max(0.0f, CorridorExitDuration);
-	if (CandidateSpaceMode == EBHCombatSpaceMode::Pocket)
-	{
-		RequiredDuration = FMath::Max(0.0f, PocketEnterDuration);
-	}
-	else if (CurrentSpaceMode == EBHCombatSpaceMode::Pocket)
-	{
-		RequiredDuration = FMath::Max(0.0f, PocketExitDuration);
-	}
-	else if (CandidateSpaceMode == EBHCombatSpaceMode::Corridor)
-	{
-		RequiredDuration = FMath::Max(0.0f, CorridorEnterDuration);
-	}
-	if (CurrentSpaceMode == EBHCombatSpaceMode::Corridor
-		&& CandidateSpaceMode != EBHCombatSpaceMode::Corridor
-		&& bCorridorMouthDetected)
-	{
-		RequiredDuration = FMath::Max(0.0f, MouthMixedEnterDuration);
-	}
-	if (SpaceModeTransitionElapsed >= RequiredDuration)
+	if (SpaceModeTransitionElapsed >= Classification.RequiredTransitionDuration)
 	{
 		const EBHCombatSpaceMode PreviousMode = CurrentSpaceMode;
 		CurrentSpaceMode = CandidateSpaceMode;
@@ -3087,6 +3035,14 @@ bool UCombatEngagementSlotComponent::RequestEngagementSlot(
 
 	PruneInvalidReservations();
 	RegisterQueueRequester(Requester);
+	const ABHEnemy* RequestingEnemy = Cast<ABHEnemy>(Requester);
+	if (!IsInitialFormationActive()
+		&& RequestingEnemy
+		&& RequestingEnemy->GetEnemySizeClass() == EBHEnemySizeClass::Large
+		&& TryForceReserveLargeEnemyAttackSlot(Requester))
+	{
+		return true;
+	}
 	if (IsRequesterReserved(Requester))
 	{
 		return true;
@@ -3221,13 +3177,13 @@ bool UCombatEngagementSlotComponent::IsRouteBlockedBySettledReservation(
 		return false;
 	}
 
-	UNavigationPath* NavigationPath = UNavigationSystemV1::FindPathToLocationSynchronously(
+	UNavigationPath* NavigationPath = FBHNavigationQuery::FindCompletePath(
 		GetWorld(),
 		Requester->GetActorLocation(),
 		Destination,
-		Requester);
-	if (!NavigationPath || !NavigationPath->IsValid() || NavigationPath->IsPartial()
-		|| NavigationPath->PathPoints.Num() < 2)
+		Requester,
+		true);
+	if (!NavigationPath)
 	{
 		return false;
 	}
@@ -3731,13 +3687,13 @@ bool UCombatEngagementSlotComponent::ShouldDeferWaitIngress(
 		return false;
 	}
 
-	UNavigationPath* WaitPath = UNavigationSystemV1::FindPathToLocationSynchronously(
+	UNavigationPath* WaitPath = FBHNavigationQuery::FindCompletePath(
 		World,
 		WaitRequester->GetActorLocation(),
 		WaitMoveGoal,
-		WaitRequester);
-	if (!WaitPath || !WaitPath->IsValid() || WaitPath->IsPartial()
-		|| WaitPath->PathPoints.Num() < 2)
+		WaitRequester,
+		true);
+	if (!WaitPath)
 	{
 		return false;
 	}
@@ -3779,13 +3735,13 @@ bool UCombatEngagementSlotComponent::ShouldDeferWaitIngress(
 			continue;
 		}
 
-		UNavigationPath* AttackPath = UNavigationSystemV1::FindPathToLocationSynchronously(
+		UNavigationPath* AttackPath = FBHNavigationQuery::FindCompletePath(
 			World,
 			AttackRequester->GetActorLocation(),
 			AttackSlotLocation,
-			AttackRequester);
-		if (!AttackPath || !AttackPath->IsValid() || AttackPath->IsPartial()
-			|| AttackPath->PathPoints.Num() < 2)
+			AttackRequester,
+			true);
+		if (!AttackPath)
 		{
 			continue;
 		}
@@ -3873,15 +3829,13 @@ bool UCombatEngagementSlotComponent::TryYieldBlockingStationaryHolding(
 		}
 	}
 
-	UNavigationPath* MovingPath = UNavigationSystemV1::FindPathToLocationSynchronously(
+	UNavigationPath* MovingPath = FBHNavigationQuery::FindCompletePath(
 		World,
 		MovingRequester->GetActorLocation(),
 		MoveGoal,
-		MovingRequester);
-	if (!MovingPath
-		|| !MovingPath->IsValid()
-		|| MovingPath->IsPartial()
-		|| MovingPath->PathPoints.Num() < 2)
+		MovingRequester,
+		true);
+	if (!MovingPath)
 	{
 		return false;
 	}
@@ -3999,26 +3953,6 @@ bool UCombatEngagementSlotComponent::TryYieldBlockingStationaryHolding(
 		PathPerpendicular * -PreferredSign
 	};
 
-	auto GetDistanceSquaredToMovingPath = [&MovingPath](const FVector& Point)
-	{
-		float BestDistanceSquared = TNumericLimits<float>::Max();
-		for (int32 PointIndex = 1;
-			PointIndex < MovingPath->PathPoints.Num();
-			++PointIndex)
-		{
-			const FVector SegmentStart = MovingPath->PathPoints[PointIndex - 1];
-			const FVector SegmentEnd = MovingPath->PathPoints[PointIndex];
-			const FVector ClosestPoint = FMath::ClosestPointOnSegment(
-				FVector(Point.X, Point.Y, 0.0f),
-				FVector(SegmentStart.X, SegmentStart.Y, 0.0f),
-				FVector(SegmentEnd.X, SegmentEnd.Y, 0.0f));
-			BestDistanceSquared = FMath::Min(
-				BestDistanceSquared,
-				FVector::DistSquared2D(Point, ClosestPoint));
-		}
-		return BestDistanceSquared;
-	};
-
 	FVector BestYieldGoal = FVector::ZeroVector;
 	float BestYieldScore = TNumericLimits<float>::Max();
 	const float YieldDistance = FMath::Max(1.0f, HoldingYieldDistance);
@@ -4039,7 +3973,9 @@ bool UCombatEngagementSlotComponent::TryYieldBlockingStationaryHolding(
 		if (!ProjectToNavigation(DesiredYieldGoal, ProjectedYieldGoal)
 			|| FVector::DistSquared2D(DesiredYieldGoal, ProjectedYieldGoal)
 				> ProjectionToleranceSquared
-			|| GetDistanceSquaredToMovingPath(ProjectedYieldGoal)
+			|| FBHNavigationQuery::PointPolylineDistanceSquared2D(
+				ProjectedYieldGoal,
+				MovingPath->PathPoints)
 				< RequiredPathClearanceSquared
 			|| FVector::Dist2D(ProjectedYieldGoal, Owner->GetActorLocation())
 				< BlockingOwnerRadius - 10.0f)
@@ -4356,6 +4292,325 @@ void UCombatEngagementSlotComponent::RefreshInitialFormationPhase()
 		GetOwner() ? *GetOwner()->GetName() : TEXT("InvalidSlotOwner"));
 }
 
+bool UCombatEngagementSlotComponent::IsSlotBlockedByLargeEnemyWedge(
+	AActor* Requester,
+	const FVector& SlotLocation) const
+{
+	const AActor* Owner = GetOwner();
+	const ABHEnemy* RequestingEnemy = Cast<ABHEnemy>(Requester);
+	if (!bEnableLargeEnemyExclusionWedge
+		|| !Owner
+		|| !Requester
+		|| (RequestingEnemy
+			&& RequestingEnemy->GetEnemySizeClass() == EBHEnemySizeClass::Large))
+	{
+		return false;
+	}
+
+	TArray<FVector, TInlineAllocator<4>> LargeEnemyLocations;
+	GatherActiveLargeEnemyLocations(LargeEnemyLocations);
+	return FBHLargeEnemyEngagementPolicy::IsLocationInsideAnyWedge(
+		Owner->GetActorLocation(),
+		SlotLocation,
+		GetLargeEnemyWedgeSettings(),
+		LargeEnemyLocations);
+}
+
+FBHLargeEnemyWedgeSettings UCombatEngagementSlotComponent::GetLargeEnemyWedgeSettings() const
+{
+	FBHLargeEnemyWedgeSettings Settings;
+	Settings.ActivationDistance = LargeEnemyWedgeActivationDistance;
+	Settings.Radius = LargeEnemyWedgeRadius;
+	Settings.HalfAngleDegrees = LargeEnemyWedgeHalfAngle;
+	Settings.HeightTolerance = LargeEnemyWedgeHeightTolerance;
+	return Settings;
+}
+
+void UCombatEngagementSlotComponent::GatherActiveLargeEnemyLocations(
+	TArray<FVector, TInlineAllocator<4>>& OutLocations) const
+{
+	OutLocations.Reset();
+	for (const FEngagementQueueEntry& Entry : EngagementQueue)
+	{
+		const ABHEnemy* LargeEnemy = Cast<ABHEnemy>(Entry.Requester.Get());
+		if (LargeEnemy
+			&& LargeEnemy->IsPoolActive()
+			&& LargeEnemy->GetCombatState() != EBHEnemyCombatState::Dead
+			&& LargeEnemy->GetEnemySizeClass() == EBHEnemySizeClass::Large)
+		{
+			OutLocations.Add(LargeEnemy->GetActorLocation());
+		}
+	}
+}
+
+bool UCombatEngagementSlotComponent::ReconcileLargeEnemyExclusionWedges()
+{
+	if (!bEnableLargeEnemyExclusionWedge || !GetOwner())
+	{
+		return false;
+	}
+
+	struct FDisplacedReservation
+	{
+		TWeakObjectPtr<AActor> Requester;
+		EBHCombatSlotType PreviousType = EBHCombatSlotType::None;
+	};
+	TArray<FDisplacedReservation, TInlineAllocator<16>> Displaced;
+	const auto RemoveBlockedOwners = [this, &Displaced](
+		TArray<TWeakObjectPtr<AActor>>& Reservations,
+		EBHCombatSlotType SlotType)
+	{
+		for (int32 SlotIndex = 0; SlotIndex < Reservations.Num(); ++SlotIndex)
+		{
+			AActor* Requester = Reservations[SlotIndex].Get();
+			FVector SlotLocation;
+			if (!Requester
+				|| !GetSlotWorldLocation(SlotType, SlotIndex, SlotLocation)
+				|| !IsSlotBlockedByLargeEnemyWedge(Requester, SlotLocation))
+			{
+				continue;
+			}
+
+			FDisplacedReservation& Entry = Displaced.AddDefaulted_GetRef();
+			Entry.Requester = Requester;
+			Entry.PreviousType = SlotType;
+			Reservations[SlotIndex].Reset();
+		}
+	};
+
+	RemoveBlockedOwners(AttackReservations, EBHCombatSlotType::Attack);
+	RemoveBlockedOwners(WaitReservations, EBHCombatSlotType::Wait);
+	RemoveBlockedOwners(HoldingReservations, EBHCombatSlotType::Holding);
+	if (Displaced.IsEmpty())
+	{
+		return false;
+	}
+
+	for (const FDisplacedReservation& Entry : Displaced)
+	{
+		AActor* Requester = Entry.Requester.Get();
+		if (!Requester)
+		{
+			continue;
+		}
+
+		bool bReassigned = false;
+		if (Entry.PreviousType == EBHCombatSlotType::Attack)
+		{
+			bReassigned = TryReserveSlot(
+				Requester,
+				EBHCombatSlotType::Attack,
+				GetMaximumAttackSlotDistance(Requester));
+		}
+		if (!bReassigned
+			&& (Entry.PreviousType == EBHCombatSlotType::Attack
+				|| Entry.PreviousType == EBHCombatSlotType::Wait))
+		{
+			bReassigned = TryReserveSlot(Requester, EBHCombatSlotType::Wait);
+		}
+		if (!bReassigned)
+		{
+			TryReserveSlot(Requester, EBHCombatSlotType::Holding);
+		}
+		NotifyRequesterSlotChanged(Requester);
+	}
+
+	++FormationRevision;
+	UE_LOG(
+		LogProjectBH,
+		Verbose,
+		TEXT("%s moved %d normal reservations out of active Large-enemy wedges."),
+		*GetOwner()->GetName(),
+		Displaced.Num());
+	return true;
+}
+
+bool UCombatEngagementSlotComponent::EnsureLargeEnemyAttackPriority()
+{
+	if (!bEnableLargeEnemyAttackPriority || !GetOwner() || !GetOwner()->HasAuthority())
+	{
+		return false;
+	}
+
+	bool bChangedAnyReservation = false;
+	for (const FEngagementQueueEntry& Entry : EngagementQueue)
+	{
+		ABHEnemy* LargeEnemy = Cast<ABHEnemy>(Entry.Requester.Get());
+		int32 ExistingAttackSlotIndex = INDEX_NONE;
+		if (!LargeEnemy
+			|| !LargeEnemy->IsPoolActive()
+			|| LargeEnemy->GetCombatState() == EBHEnemyCombatState::Dead
+			|| LargeEnemy->GetEnemySizeClass() != EBHEnemySizeClass::Large
+			|| FindReservation(AttackReservations, LargeEnemy, ExistingAttackSlotIndex))
+		{
+			continue;
+		}
+
+		bChangedAnyReservation |= TryForceReserveLargeEnemyAttackSlot(LargeEnemy);
+	}
+	return bChangedAnyReservation;
+}
+
+bool UCombatEngagementSlotComponent::TryForceReserveLargeEnemyAttackSlot(AActor* Requester)
+{
+	ABHEnemy* LargeEnemy = Cast<ABHEnemy>(Requester);
+	if (!bEnableLargeEnemyAttackPriority
+		|| !LargeEnemy
+		|| !GetOwner()
+		|| !GetOwner()->HasAuthority()
+		|| !LargeEnemy->IsPoolActive()
+		|| LargeEnemy->GetCombatState() == EBHEnemyCombatState::Dead
+		|| LargeEnemy->GetEnemySizeClass() != EBHEnemySizeClass::Large)
+	{
+		return false;
+	}
+
+	int32 ExistingAttackSlotIndex = INDEX_NONE;
+	if (FindReservation(AttackReservations, Requester, ExistingAttackSlotIndex))
+	{
+		return true;
+	}
+	const int32 LargeAttackerLimit = LargeEnemy->GetMaxConcurrentAttackersOfSize();
+	if (LargeAttackerLimit > 0)
+	{
+		int32 OtherLargeAttackerCount = 0;
+		for (const TWeakObjectPtr<AActor>& Reservation : AttackReservations)
+		{
+			const ABHEnemy* OtherEnemy = Cast<ABHEnemy>(Reservation.Get());
+			OtherLargeAttackerCount += OtherEnemy
+				&& OtherEnemy != LargeEnemy
+				&& OtherEnemy->GetEnemySizeClass() == EBHEnemySizeClass::Large
+				? 1
+				: 0;
+		}
+		if (OtherLargeAttackerCount >= LargeAttackerLimit)
+		{
+			return false;
+		}
+	}
+
+	const int32 ActiveAttackSlotCount = GetActiveAttackSlotCount();
+	const float MaximumAttackSlotDistance = GetMaximumAttackSlotDistance(Requester);
+	FBHLargeEnemyAttackPolicyInput PolicyInput;
+	PolicyInput.ActiveAttackCapacity = ActiveAttackSlotCount;
+	PolicyInput.RequesterCost = LargeEnemy->GetAttackSlotCost();
+	PolicyInput.RequesterExclusionRadius = LargeEnemy->GetAttackSlotExclusionRadius();
+	for (int32 SlotIndex = 0; SlotIndex < ActiveAttackSlotCount; ++SlotIndex)
+	{
+		AActor* AttackOwner = AttackReservations[SlotIndex].Get();
+		if (!AttackOwner || AttackOwner == Requester)
+		{
+			continue;
+		}
+
+		const ABHEnemy* AttackEnemy = Cast<ABHEnemy>(AttackOwner);
+		FBHAttackOwnerPolicyView& OwnerView = PolicyInput.Owners.AddDefaulted_GetRef();
+		OwnerView.Requester = AttackOwner;
+		OwnerView.SlotIndex = SlotIndex;
+		OwnerView.Cost = AttackEnemy ? AttackEnemy->GetAttackSlotCost() : 1;
+		OwnerView.ExclusionRadius = AttackEnemy
+			? AttackEnemy->GetAttackSlotExclusionRadius()
+			: 0.0f;
+		OwnerView.bLarge = AttackEnemy
+			&& AttackEnemy->GetEnemySizeClass() == EBHEnemySizeClass::Large;
+		OwnerView.bHasValidSlotLocation = GetSlotWorldLocation(
+			EBHCombatSlotType::Attack,
+			SlotIndex,
+			OwnerView.SlotLocation);
+	}
+
+	for (int32 AttackSlotIndex = 0; AttackSlotIndex < ActiveAttackSlotCount; ++AttackSlotIndex)
+	{
+		FVector AttackSlotLocation;
+		if (!GetSlotWorldLocation(
+			EBHCombatSlotType::Attack,
+			AttackSlotIndex,
+			AttackSlotLocation)
+			|| FVector::DistSquared2D(GetOwner()->GetActorLocation(), AttackSlotLocation)
+				> FMath::Square(MaximumAttackSlotDistance))
+		{
+			continue;
+		}
+
+		float PathScore = 0.0f;
+		if (!GetNavigationPathScore(Requester, AttackSlotLocation, PathScore))
+		{
+			continue;
+		}
+
+		FBHAttackSlotPolicyCandidate& Candidate = PolicyInput.Candidates.AddDefaulted_GetRef();
+		Candidate.SlotIndex = AttackSlotIndex;
+		Candidate.SlotLocation = AttackSlotLocation;
+		Candidate.PathScore = PathScore;
+		Candidate.bPreferredCorridorSide = !IsCorridorFormationActive()
+			|| IsCorridorAttackSlotOnRequesterSide(Requester, AttackSlotIndex);
+	}
+
+	const FBHLargeEnemyAttackPolicyPlan Plan =
+		FBHLargeEnemyEngagementPolicy::BuildAttackReservationPlan(PolicyInput);
+	if (!Plan.IsValid())
+	{
+		return false;
+	}
+
+	for (TWeakObjectPtr<AActor>& Reservation : AttackReservations)
+	{
+		if (Plan.NormalOwnersToYield.Contains(Reservation.Get()))
+		{
+			Reservation.Reset();
+		}
+	}
+	for (TWeakObjectPtr<AActor>& Reservation : WaitReservations)
+	{
+		if (Reservation.Get() == Requester)
+		{
+			Reservation.Reset();
+		}
+	}
+	for (TWeakObjectPtr<AActor>& Reservation : HoldingReservations)
+	{
+		if (Reservation.Get() == Requester)
+		{
+			Reservation.Reset();
+		}
+	}
+
+	AttackReservations[Plan.AttackSlotIndex] = Requester;
+	if (AttackSlotVacantElapsed.IsValidIndex(Plan.AttackSlotIndex))
+	{
+		AttackSlotVacantElapsed[Plan.AttackSlotIndex] = 0.0f;
+	}
+	UpdateCorridorSideForAttackReservation(Requester, Plan.AttackSlotIndex);
+
+	for (AActor* Victim : Plan.NormalOwnersToYield)
+	{
+		if (!Victim)
+		{
+			continue;
+		}
+		if (!TryReserveWaitSlot(Victim))
+		{
+			TryReserveSlot(Victim, EBHCombatSlotType::Holding);
+		}
+		NotifyRequesterSlotChanged(Victim);
+	}
+	if (IsCorridorFormationActive())
+	{
+		RepackAllCorridorQueueLayers(true);
+	}
+	NotifyRequesterSlotChanged(Requester);
+	++FormationRevision;
+	UE_LOG(
+		LogProjectBH,
+		Display,
+		TEXT("%s reserved priority Attack slot %d for Large enemy %s; %d Normal owner(s) yielded."),
+		*GetOwner()->GetName(),
+		Plan.AttackSlotIndex,
+		*Requester->GetName(),
+		Plan.NormalOwnersToYield.Num());
+	return true;
+}
+
 void UCombatEngagementSlotComponent::UpdateAttackVacancyTimers(float DeltaTime)
 {
 	if (AttackSlotVacantElapsed.Num() != AttackReservations.Num())
@@ -4427,7 +4682,9 @@ bool UCombatEngagementSlotComponent::FindClosestCoreIntrusionPair(
 	{
 		AActor* AttackOwner = AttackReservations[AttackSlotIndex].Get();
 		const ABHEnemy* AttackEnemy = Cast<ABHEnemy>(AttackOwner);
-		if (!AttackEnemy || AttackEnemy->GetCombatState() != EBHEnemyCombatState::Chasing)
+		if (!AttackEnemy
+			|| AttackEnemy->GetEnemySizeClass() == EBHEnemySizeClass::Large
+			|| AttackEnemy->GetCombatState() != EBHEnemyCombatState::Chasing)
 		{
 			continue;
 		}
@@ -4503,6 +4760,12 @@ bool UCombatEngagementSlotComponent::ExecuteCoreIntrusionHandover(
 		|| AttackReservations[AttackSlotIndex].Get() != AttackOwner
 		|| !AttackOwner
 		|| !Intruder)
+	{
+		return false;
+	}
+	const ABHEnemy* CurrentAttackEnemy = Cast<ABHEnemy>(AttackOwner);
+	if (CurrentAttackEnemy
+		&& CurrentAttackEnemy->GetEnemySizeClass() == EBHEnemySizeClass::Large)
 	{
 		return false;
 	}
@@ -4640,6 +4903,7 @@ bool UCombatEngagementSlotComponent::FindFastAttackHandoverCandidate(
 	OutWaitSlotIndex = INDEX_NONE;
 	const ABHEnemy* CurrentEnemy = Cast<ABHEnemy>(CurrentAttackOwner);
 	if (!CurrentEnemy
+		|| CurrentEnemy->GetEnemySizeClass() == EBHEnemySizeClass::Large
 		|| CurrentEnemy->GetCombatState() != EBHEnemyCombatState::Chasing
 		|| !AttackReservations.IsValidIndex(AttackSlotIndex)
 		|| AttackSlotIndex >= GetActiveAttackSlotCount())
@@ -4731,6 +4995,12 @@ bool UCombatEngagementSlotComponent::ExecuteAttackWaitHandover(
 		|| WaitReservations[WaitSlotIndex].Get() != Candidate
 		|| !CurrentAttackOwner
 		|| !Candidate)
+	{
+		return false;
+	}
+	const ABHEnemy* CurrentAttackEnemy = Cast<ABHEnemy>(CurrentAttackOwner);
+	if (CurrentAttackEnemy
+		&& CurrentAttackEnemy->GetEnemySizeClass() == EBHEnemySizeClass::Large)
 	{
 		return false;
 	}
@@ -4929,6 +5199,7 @@ void UCombatEngagementSlotComponent::FinalizeInitialFormationAssignments()
 	{
 		Reservation.Reset();
 	}
+	EnsureLargeEnemyAttackPriority();
 
 	AActor* Requester = nullptr;
 	int32 AttackSlotIndex = INDEX_NONE;
@@ -6744,6 +7015,10 @@ bool UCombatEngagementSlotComponent::TryReserveSlot(
 		{
 			continue;
 		}
+		if (IsSlotBlockedByLargeEnemyWedge(Requester, SlotLocation))
+		{
+			continue;
+		}
 
 		if (MaxDistanceFromOwner >= 0.0f
 			&& FVector::DistSquared2D(GetOwner()->GetActorLocation(), SlotLocation)
@@ -7090,27 +7365,6 @@ bool UCombatEngagementSlotComponent::ResolveCombatCoreEscapeGoal(
 	const float OccupiedPathClearanceSquared = FMath::Square(
 		FMath::Max(0.0f, CombatCoreEscapeOccupiedPathClearance));
 
-	const auto PointSegmentDistanceSquared2D = [](
-		const FVector& Point,
-		const FVector& SegmentStart,
-		const FVector& SegmentEnd)
-	{
-		const FVector2D Point2D(Point);
-		const FVector2D Start2D(SegmentStart);
-		const FVector2D End2D(SegmentEnd);
-		const FVector2D Segment = End2D - Start2D;
-		const float SegmentLengthSquared = Segment.SizeSquared();
-		if (SegmentLengthSquared <= UE_KINDA_SMALL_NUMBER)
-		{
-			return FVector2D::DistSquared(Point2D, Start2D);
-		}
-		const float Alpha = FMath::Clamp(
-			FVector2D::DotProduct(Point2D - Start2D, Segment) / SegmentLengthSquared,
-			0.0f,
-			1.0f);
-		return FVector2D::DistSquared(Point2D, Start2D + Segment * Alpha);
-	};
-
 	bool bFoundCandidate = false;
 	int32 BestBlockingAttackCount = TNumericLimits<int32>::Max();
 	float BestScore = TNumericLimits<float>::Max();
@@ -7147,7 +7401,7 @@ bool UCombatEngagementSlotComponent::ResolveCombatCoreEscapeGoal(
 			const AActor* AttackOwner = Reservation.Get();
 			if (AttackOwner
 				&& AttackOwner != Requester
-				&& PointSegmentDistanceSquared2D(
+				&& FBHNavigationQuery::PointSegmentDistanceSquared2D(
 					AttackOwner->GetActorLocation(),
 					RequesterLocation,
 					ProjectedLocation) < OccupiedPathClearanceSquared)
@@ -7439,12 +7693,12 @@ bool UCombatEngagementSlotComponent::GetNavigationPathScoreBetween(
 		return false;
 	}
 
-	UNavigationPath* NavigationPath = UNavigationSystemV1::FindPathToLocationSynchronously(
+	UNavigationPath* NavigationPath = FBHNavigationQuery::FindCompletePath(
 		GetWorld(),
 		Start,
 		Destination,
 		Requester);
-	if (!NavigationPath || !NavigationPath->IsValid() || NavigationPath->IsPartial())
+	if (!NavigationPath)
 	{
 		return false;
 	}
@@ -7642,6 +7896,67 @@ void UCombatEngagementSlotComponent::DrawDebugSlots() const
 		FVector::ForwardVector,
 		FVector::RightVector,
 		false);
+	if (bEnableLargeEnemyExclusionWedge)
+	{
+		const FVector WedgeOrigin = Owner->GetActorLocation() + FVector(0.0f, 0.0f, 6.0f);
+		const FBHLargeEnemyWedgeSettings WedgeSettings = GetLargeEnemyWedgeSettings();
+		const float WedgeRadius = FMath::Max(0.0f, WedgeSettings.Radius);
+		const float WedgeHalfAngle = FMath::Clamp(WedgeSettings.HalfAngleDegrees, 0.0f, 90.0f);
+		constexpr int32 WedgeArcSegments = 16;
+		TArray<FVector, TInlineAllocator<4>> LargeEnemyLocations;
+		GatherActiveLargeEnemyLocations(LargeEnemyLocations);
+		for (const FVector& LargeEnemyLocation : LargeEnemyLocations)
+		{
+			FVector CenterDirection;
+			if (!FBHLargeEnemyEngagementPolicy::TryGetActiveWedgeDirection(
+				Owner->GetActorLocation(),
+				LargeEnemyLocation,
+				WedgeSettings,
+				CenterDirection))
+			{
+				continue;
+			}
+
+			FVector PreviousArcPoint = WedgeOrigin
+				+ CenterDirection.RotateAngleAxis(-WedgeHalfAngle, FVector::UpVector) * WedgeRadius;
+			DrawDebugLine(
+				World,
+				WedgeOrigin,
+				PreviousArcPoint,
+				FColor::Magenta,
+				false,
+				0.12f,
+				0,
+				2.0f);
+			for (int32 SegmentIndex = 1; SegmentIndex <= WedgeArcSegments; ++SegmentIndex)
+			{
+				const float Alpha = static_cast<float>(SegmentIndex)
+					/ static_cast<float>(WedgeArcSegments);
+				const float Angle = FMath::Lerp(-WedgeHalfAngle, WedgeHalfAngle, Alpha);
+				const FVector ArcPoint = WedgeOrigin
+					+ CenterDirection.RotateAngleAxis(Angle, FVector::UpVector) * WedgeRadius;
+				DrawDebugLine(
+					World,
+					PreviousArcPoint,
+					ArcPoint,
+					FColor::Magenta,
+					false,
+					0.12f,
+					0,
+					2.0f);
+				PreviousArcPoint = ArcPoint;
+			}
+			DrawDebugLine(
+				World,
+				WedgeOrigin,
+				PreviousArcPoint,
+				FColor::Magenta,
+				false,
+				0.12f,
+				0,
+				2.0f);
+		}
+	}
 	if (IsCorridorFormationActive())
 	{
 		const float BypassRadius = FMath::Max3(

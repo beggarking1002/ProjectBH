@@ -6,6 +6,8 @@
 #include "Components/ActorComponent.h"
 #include "CombatEngagementSlotComponent.generated.h"
 
+struct FBHLargeEnemyWedgeSettings;
+
 UENUM(BlueprintType)
 enum class EBHCombatSlotType : uint8
 {
@@ -176,6 +178,30 @@ protected:
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Engagement Slots", meta = (ClampMin = "0.0", Units = "cm"))
 	float HoldingRingRadius = 400.0f;
+
+	/** Reserves a player-centered sector for every nearby Large enemy. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Large Enemy Space")
+	bool bEnableLargeEnemyExclusionWedge = true;
+
+	/** Large enemies take a reachable Attack slot before Normal attack owners. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Large Enemy Space")
+	bool bEnableLargeEnemyAttackPriority = true;
+
+	/** A Large enemy begins reserving its approach sector inside this player distance. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Large Enemy Space", meta = (ClampMin = "0.0", Units = "cm"))
+	float LargeEnemyWedgeActivationDistance = 650.0f;
+
+	/** Radial reach of the reserved sector measured from the player. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Large Enemy Space", meta = (ClampMin = "0.0", Units = "cm"))
+	float LargeEnemyWedgeRadius = 450.0f;
+
+	/** Half-angle on either side of the player-to-Large-enemy direction. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Large Enemy Space", meta = (ClampMin = "0.0", ClampMax = "90.0", Units = "deg"))
+	float LargeEnemyWedgeHalfAngle = 50.0f;
+
+	/** Prevents a Large enemy on another floor from reserving this formation. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Large Enemy Space", meta = (ClampMin = "0.0", Units = "cm"))
+	float LargeEnemyWedgeHeightTolerance = 150.0f;
 
 	/** First overflow radius used by queued enemies beyond Holding capacity. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Pending Queue", meta = (ClampMin = "0.0", Units = "cm"))
@@ -878,6 +904,12 @@ private:
 	void UpdateEngagementAnchor(float DeltaTime);
 	void PruneInvalidReservations();
 	void RefreshInitialFormationPhase();
+	bool ReconcileLargeEnemyExclusionWedges();
+	bool IsSlotBlockedByLargeEnemyWedge(AActor* Requester, const FVector& SlotLocation) const;
+	FBHLargeEnemyWedgeSettings GetLargeEnemyWedgeSettings() const;
+	void GatherActiveLargeEnemyLocations(TArray<FVector, TInlineAllocator<4>>& OutLocations) const;
+	bool EnsureLargeEnemyAttackPriority();
+	bool TryForceReserveLargeEnemyAttackSlot(AActor* Requester);
 	void UpdateAttackVacancyTimers(float DeltaTime);
 	void RefreshFastAttackHandovers(float DeltaTime);
 	void ActivatePocketRapidReform();

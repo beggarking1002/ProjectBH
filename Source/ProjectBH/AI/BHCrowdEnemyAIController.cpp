@@ -2,6 +2,7 @@
 
 #include "BHCrowdEnemyAIController.h"
 
+#include "Navigation/BHNavigationQuery.h"
 #include "../BHHeroCharacter.h"
 #include "../Components/Combat/CombatEngagementSlotComponent.h"
 #include "../Debug/BHDebugDraw.h"
@@ -19,6 +20,9 @@
 
 namespace
 {
+constexpr int32 NormalEnemyAvoidanceGroup = 1 << 0;
+constexpr int32 LargeEnemyAvoidanceGroup = 1 << 1;
+
 bool IsIntermediateCombatRouteStage(EBHCombatMoveRouteStage RouteStage)
 {
 	switch (RouteStage)
@@ -113,6 +117,21 @@ void ABHCrowdEnemyAIController::ApplyCrowdFollowingSettings()
 	CrowdFollowing->SetCrowdCollisionQueryRange(FMath::Max(0.0f, CrowdCollisionQueryRange));
 	CrowdFollowing->SetCrowdAvoidanceRangeMultiplier(FMath::Max(0.1f, CrowdAvoidanceRangeMultiplier));
 	CrowdFollowing->SetCrowdSlowdownAtGoal(true);
+
+	// Normal agents account for both groups, while a Large agent only
+	// accounts for other Large agents. This makes the small crowd yield locally
+	// without making the Troll weave or stop behind it.
+	const ABHEnemy* ControlledEnemy = Cast<ABHEnemy>(GetPawn());
+	const bool bIsLargeEnemy = ControlledEnemy
+		&& ControlledEnemy->GetEnemySizeClass() == EBHEnemySizeClass::Large;
+	CrowdFollowing->SetAvoidanceGroup(
+		bIsLargeEnemy ? LargeEnemyAvoidanceGroup : NormalEnemyAvoidanceGroup);
+	CrowdFollowing->SetGroupsToAvoid(
+		bIsLargeEnemy
+			? LargeEnemyAvoidanceGroup
+			: (NormalEnemyAvoidanceGroup | LargeEnemyAvoidanceGroup));
+	CrowdFollowing->SetGroupsToIgnore(
+		bIsLargeEnemy ? NormalEnemyAvoidanceGroup : 0);
 
 	UE_LOG(
 		LogProjectBH,
@@ -947,12 +966,12 @@ bool ABHCrowdEnemyAIController::IsHeroReachable(const ABHHeroCharacter* Hero) co
 		return false;
 	}
 
-	UNavigationPath* NavigationPath = UNavigationSystemV1::FindPathToLocationSynchronously(
+	UNavigationPath* NavigationPath = FBHNavigationQuery::FindCompletePath(
 		World,
 		ControlledPawn->GetActorLocation(),
 		ProjectedTargetLocation.Location,
 		const_cast<APawn*>(ControlledPawn));
-	return NavigationPath && NavigationPath->IsValid() && !NavigationPath->IsPartial();
+	return NavigationPath != nullptr;
 }
 
 bool ABHCrowdEnemyAIController::IsHeroHighGroundDropCandidate(
@@ -1918,12 +1937,12 @@ bool ABHCrowdEnemyAIController::FindOverlapEscapeGoal(
 	});
 	for (const FOverlapEscapeCandidate& Candidate : Candidates)
 	{
-		UNavigationPath* EscapePath = UNavigationSystemV1::FindPathToLocationSynchronously(
+		UNavigationPath* EscapePath = FBHNavigationQuery::FindCompletePath(
 			GetWorld(),
 			ControlledLocation,
 			Candidate.Location,
 			ControlledEnemy);
-		if (EscapePath && EscapePath->IsValid() && !EscapePath->IsPartial())
+		if (EscapePath)
 		{
 			OutEscapeGoal = Candidate.Location;
 			return true;
@@ -1991,15 +2010,18 @@ int32 ABHCrowdEnemyAIController::GetOverlapPriority(const ABHEnemy* Enemy) const
 	{
 		return 0;
 	}
+	const int32 SizePriority = Enemy->GetEnemySizeClass() == EBHEnemySizeClass::Large
+		? 1000
+		: 0;
 
 	switch (Enemy->GetCombatState())
 	{
 	case EBHEnemyCombatState::Staggered:
-		return 600;
+		return SizePriority + 600;
 	case EBHEnemyCombatState::Attacking:
-		return 550;
+		return SizePriority + 550;
 	case EBHEnemyCombatState::Recovering:
-		return 500;
+		return SizePriority + 500;
 	case EBHEnemyCombatState::Dead:
 		return 0;
 	case EBHEnemyCombatState::Chasing:
@@ -2012,22 +2034,22 @@ int32 ABHCrowdEnemyAIController::GetOverlapPriority(const ABHEnemy* Enemy) const
 	{
 		// A live enemy without this controller cannot perform its own escape, so the
 		// controlled crowd agent must route around it.
-		return 450;
+		return SizePriority + 450;
 	}
 
 	switch (OtherController->GetCurrentCombatSlotType())
 	{
 	case EBHCombatSlotType::Attack:
-		return 400;
+		return SizePriority + 400;
 	case EBHCombatSlotType::Wait:
-		return 300;
+		return SizePriority + 300;
 	case EBHCombatSlotType::Holding:
-		return 250;
+		return SizePriority + 250;
 	case EBHCombatSlotType::Pending:
-		return 200;
+		return SizePriority + 200;
 	case EBHCombatSlotType::None:
 	default:
-		return 100;
+		return SizePriority + 100;
 	}
 }
 
