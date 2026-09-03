@@ -4,13 +4,15 @@
 
 #include "GameFramework/Actor.h"
 
-bool FBHLargeEnemyEngagementPolicy::TryGetActiveWedgeDirection(
+bool FBHLargeEnemyEngagementPolicy::TryGetActiveWedgeGeometry(
 	const FVector& OwnerLocation,
 	const FVector& LargeEnemyLocation,
 	const FBHLargeEnemyWedgeSettings& Settings,
-	FVector& OutDirection)
+	FVector& OutDirection,
+	float& OutRadius)
 {
 	OutDirection = FVector::ZeroVector;
+	OutRadius = 0.0f;
 	FVector OwnerToLarge = LargeEnemyLocation - OwnerLocation;
 	if (FMath::Abs(OwnerToLarge.Z) > FMath::Max(0.0f, Settings.HeightTolerance))
 	{
@@ -25,8 +27,12 @@ bool FBHLargeEnemyEngagementPolicy::TryGetActiveWedgeDirection(
 		return false;
 	}
 
+	const float LargeEnemyDistance = OwnerToLarge.Size2D();
 	OutDirection = OwnerToLarge.GetSafeNormal2D();
-	return !OutDirection.IsNearlyZero();
+	OutRadius = FMath::Min(
+		FMath::Max(0.0f, Settings.Radius),
+		LargeEnemyDistance + FMath::Max(0.0f, Settings.RearDepth));
+	return !OutDirection.IsNearlyZero() && OutRadius > UE_SMALL_NUMBER;
 }
 
 bool FBHLargeEnemyEngagementPolicy::IsLocationInsideAnyWedge(
@@ -54,11 +60,14 @@ bool FBHLargeEnemyEngagementPolicy::IsLocationInsideAnyWedge(
 	for (const FVector& LargeEnemyLocation : LargeEnemyLocations)
 	{
 		FVector WedgeDirection;
-		if (TryGetActiveWedgeDirection(
+		float WedgeRadius = 0.0f;
+		if (TryGetActiveWedgeGeometry(
 			OwnerLocation,
 			LargeEnemyLocation,
 			Settings,
-			WedgeDirection)
+			WedgeDirection,
+			WedgeRadius)
+			&& SlotRadius <= WedgeRadius
 			&& FVector::DotProduct(SlotDirection, WedgeDirection) >= MinimumDirectionDot)
 		{
 			return true;

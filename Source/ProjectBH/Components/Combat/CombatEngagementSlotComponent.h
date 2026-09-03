@@ -195,9 +195,17 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Large Enemy Space", meta = (ClampMin = "0.0", Units = "cm"))
 	float LargeEnemyWedgeRadius = 450.0f;
 
+	/** Maximum distance that the reserved sector extends beyond the Large enemy center. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Large Enemy Space", meta = (ClampMin = "0.0", Units = "cm"))
+	float LargeEnemyWedgeRearDepth = 100.0f;
+
 	/** Half-angle on either side of the player-to-Large-enemy direction. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Large Enemy Space", meta = (ClampMin = "0.0", ClampMax = "90.0", Units = "deg"))
 	float LargeEnemyWedgeHalfAngle = 50.0f;
+
+	/** Existing reservations must enter this far inside the wedge before being displaced. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Large Enemy Space", meta = (ClampMin = "0.0", ClampMax = "45.0", Units = "deg"))
+	float LargeEnemyWedgeOccupiedSlotInset = 8.0f;
 
 	/** Prevents a Large enemy on another floor from reserving this formation. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Large Enemy Space", meta = (ClampMin = "0.0", Units = "cm"))

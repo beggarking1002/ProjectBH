@@ -4321,6 +4321,7 @@ FBHLargeEnemyWedgeSettings UCombatEngagementSlotComponent::GetLargeEnemyWedgeSet
 	FBHLargeEnemyWedgeSettings Settings;
 	Settings.ActivationDistance = LargeEnemyWedgeActivationDistance;
 	Settings.Radius = LargeEnemyWedgeRadius;
+	Settings.RearDepth = LargeEnemyWedgeRearDepth;
 	Settings.HalfAngleDegrees = LargeEnemyWedgeHalfAngle;
 	Settings.HeightTolerance = LargeEnemyWedgeHeightTolerance;
 	return Settings;
@@ -4354,9 +4355,18 @@ bool UCombatEngagementSlotComponent::ReconcileLargeEnemyExclusionWedges()
 	{
 		TWeakObjectPtr<AActor> Requester;
 		EBHCombatSlotType PreviousType = EBHCombatSlotType::None;
+		int32 PreviousSlotIndex = INDEX_NONE;
 	};
+	TArray<FVector, TInlineAllocator<4>> LargeEnemyLocations;
+	GatherActiveLargeEnemyLocations(LargeEnemyLocations);
+	FBHLargeEnemyWedgeSettings OccupiedSlotSettings = GetLargeEnemyWedgeSettings();
+	OccupiedSlotSettings.HalfAngleDegrees = FMath::Max(
+		0.0f,
+		OccupiedSlotSettings.HalfAngleDegrees
+			- FMath::Max(0.0f, LargeEnemyWedgeOccupiedSlotInset));
+
 	TArray<FDisplacedReservation, TInlineAllocator<16>> Displaced;
-	const auto RemoveBlockedOwners = [this, &Displaced](
+	const auto RemoveBlockedOwners = [this, &Displaced, &LargeEnemyLocations, &OccupiedSlotSettings](
 		TArray<TWeakObjectPtr<AActor>>& Reservations,
 		EBHCombatSlotType SlotType)
 	{
@@ -4366,7 +4376,11 @@ bool UCombatEngagementSlotComponent::ReconcileLargeEnemyExclusionWedges()
 			FVector SlotLocation;
 			if (!Requester
 				|| !GetSlotWorldLocation(SlotType, SlotIndex, SlotLocation)
-				|| !IsSlotBlockedByLargeEnemyWedge(Requester, SlotLocation))
+				|| !FBHLargeEnemyEngagementPolicy::IsLocationInsideAnyWedge(
+					GetOwner()->GetActorLocation(),
+					SlotLocation,
+					OccupiedSlotSettings,
+					LargeEnemyLocations))
 			{
 				continue;
 			}
@@ -4374,6 +4388,7 @@ bool UCombatEngagementSlotComponent::ReconcileLargeEnemyExclusionWedges()
 			FDisplacedReservation& Entry = Displaced.AddDefaulted_GetRef();
 			Entry.Requester = Requester;
 			Entry.PreviousType = SlotType;
+			Entry.PreviousSlotIndex = SlotIndex;
 			Reservations[SlotIndex].Reset();
 		}
 	};
@@ -4386,6 +4401,7 @@ bool UCombatEngagementSlotComponent::ReconcileLargeEnemyExclusionWedges()
 		return false;
 	}
 
+	int32 ReassignedCount = 0;
 	for (const FDisplacedReservation& Entry : Displaced)
 	{
 		AActor* Requester = Entry.Requester.Get();
@@ -4410,18 +4426,51 @@ bool UCombatEngagementSlotComponent::ReconcileLargeEnemyExclusionWedges()
 		}
 		if (!bReassigned)
 		{
-			TryReserveSlot(Requester, EBHCombatSlotType::Holding);
+			bReassigned = TryReserveSlot(Requester, EBHCombatSlotType::Holding);
 		}
+		if (!bReassigned)
+		{
+			// Capacity outside the wedge can be temporarily exhausted. Restoring the
+			// old reservation is visually stable and avoids a no-slot/reacquire loop.
+			TArray<TWeakObjectPtr<AActor>>* PreviousReservations = nullptr;
+			switch (Entry.PreviousType)
+			{
+			case EBHCombatSlotType::Attack:
+				PreviousReservations = &AttackReservations;
+				break;
+			case EBHCombatSlotType::Wait:
+				PreviousReservations = &WaitReservations;
+				break;
+			case EBHCombatSlotType::Holding:
+				PreviousReservations = &HoldingReservations;
+				break;
+			default:
+				break;
+			}
+			if (PreviousReservations
+				&& PreviousReservations->IsValidIndex(Entry.PreviousSlotIndex)
+				&& !(*PreviousReservations)[Entry.PreviousSlotIndex].IsValid())
+			{
+				(*PreviousReservations)[Entry.PreviousSlotIndex] = Requester;
+			}
+			continue;
+		}
+
 		NotifyRequesterSlotChanged(Requester);
+		++ReassignedCount;
 	}
 
+	if (ReassignedCount == 0)
+	{
+		return false;
+	}
 	++FormationRevision;
 	UE_LOG(
 		LogProjectBH,
 		Verbose,
 		TEXT("%s moved %d normal reservations out of active Large-enemy wedges."),
 		*GetOwner()->GetName(),
-		Displaced.Num());
+		ReassignedCount);
 	return true;
 }
 
@@ -7900,7 +7949,6 @@ void UCombatEngagementSlotComponent::DrawDebugSlots() const
 	{
 		const FVector WedgeOrigin = Owner->GetActorLocation() + FVector(0.0f, 0.0f, 6.0f);
 		const FBHLargeEnemyWedgeSettings WedgeSettings = GetLargeEnemyWedgeSettings();
-		const float WedgeRadius = FMath::Max(0.0f, WedgeSettings.Radius);
 		const float WedgeHalfAngle = FMath::Clamp(WedgeSettings.HalfAngleDegrees, 0.0f, 90.0f);
 		constexpr int32 WedgeArcSegments = 16;
 		TArray<FVector, TInlineAllocator<4>> LargeEnemyLocations;
@@ -7908,11 +7956,13 @@ void UCombatEngagementSlotComponent::DrawDebugSlots() const
 		for (const FVector& LargeEnemyLocation : LargeEnemyLocations)
 		{
 			FVector CenterDirection;
-			if (!FBHLargeEnemyEngagementPolicy::TryGetActiveWedgeDirection(
+			float WedgeRadius = 0.0f;
+			if (!FBHLargeEnemyEngagementPolicy::TryGetActiveWedgeGeometry(
 				Owner->GetActorLocation(),
 				LargeEnemyLocation,
 				WedgeSettings,
-				CenterDirection))
+				CenterDirection,
+				WedgeRadius))
 			{
 				continue;
 			}

@@ -11,6 +11,7 @@ struct FBHLargeEnemyWedgeSettings
 {
 	float ActivationDistance = 0.0f;
 	float Radius = 0.0f;
+	float RearDepth = 0.0f;
 	float HalfAngleDegrees = 0.0f;
 	float HeightTolerance = 0.0f;
 };
@@ -66,12 +67,13 @@ struct FBHLargeEnemyAttackPolicyPlan
 class PROJECTBH_API FBHLargeEnemyEngagementPolicy final
 {
 public:
-	/** Resolves the horizontal wedge direction when the Large enemy activates one. */
-	static bool TryGetActiveWedgeDirection(
+	/** Resolves the active direction and its player-centered radial reach. */
+	static bool TryGetActiveWedgeGeometry(
 		const FVector& OwnerLocation,
 		const FVector& LargeEnemyLocation,
 		const FBHLargeEnemyWedgeSettings& Settings,
-		FVector& OutDirection);
+		FVector& OutDirection,
+		float& OutRadius);
 
 	/** True when a slot lies inside any active Large-enemy wedge. */
 	static bool IsLocationInsideAnyWedge(
