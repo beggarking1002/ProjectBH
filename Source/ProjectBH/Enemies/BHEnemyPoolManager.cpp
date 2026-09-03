@@ -125,12 +125,18 @@ void ABHEnemyPoolManager::NotifyEnemyDied(ABHEnemy* Enemy)
 
 int32 ABHEnemyPoolManager::GetAliveEnemyCount() const
 {
-	int32 Count = 0;
-	for (const ABHEnemy* Enemy : PoolEnemies)
-	{
-		Count += IsValid(Enemy) && Enemy->IsPoolActive() ? 1 : 0;
-	}
-	return Count;
+	return GetAliveEnemyCount(EPooledEnemyKind::Normal)
+		+ GetAliveEnemyCount(EPooledEnemyKind::Troll);
+}
+
+int32 ABHEnemyPoolManager::GetAliveNormalEnemyCount() const
+{
+	return GetAliveEnemyCount(EPooledEnemyKind::Normal);
+}
+
+int32 ABHEnemyPoolManager::GetAliveTrollCount() const
+{
+	return GetAliveEnemyCount(EPooledEnemyKind::Troll);
 }
 
 int32 ABHEnemyPoolManager::GetFreeEnemyCount() const
@@ -160,15 +166,32 @@ void ABHEnemyPoolManager::InitializePool()
 		UE_LOG(LogProjectBH, Error, TEXT("%s cannot initialize: assign Enemy Class."), *GetName());
 		return;
 	}
+	if (TrollEnemyClass == EnemyClass)
+	{
+		UE_LOG(
+			LogProjectBH,
+			Error,
+			TEXT("%s cannot use the same class for Enemy Class and Troll Enemy Class; disabling Troll composition."),
+			*GetName());
+		TrollEnemyClass = nullptr;
+	}
 
 	PoolCapacity = FMath::Max(1, PoolCapacity);
 	ActiveEnemyLimit = FMath::Clamp(ActiveEnemyLimit, 1, PoolCapacity);
+	NormalEnemiesPerTroll = FMath::Max(1, NormalEnemiesPerTroll);
 	PoolEnemies.Reserve(PoolCapacity);
 	FreeEnemies.Reserve(PoolCapacity);
 
+	const int32 TrollPoolCapacity = TrollEnemyClass
+		? GetDesiredTrollCount(PoolCapacity)
+		: 0;
+	const int32 NormalPoolCapacity = PoolCapacity - TrollPoolCapacity;
 	for (int32 PoolIndex = 0; PoolIndex < PoolCapacity; ++PoolIndex)
 	{
-		if (ABHEnemy* Enemy = SpawnPooledEnemy(PoolIndex))
+		const TSubclassOf<ABHEnemy> PooledClass = PoolIndex < NormalPoolCapacity
+			? EnemyClass
+			: TrollEnemyClass;
+		if (ABHEnemy* Enemy = SpawnPooledEnemy(PoolIndex, PooledClass))
 		{
 			PoolEnemies.Add(Enemy);
 			FreeEnemies.Add(Enemy);
@@ -176,37 +199,59 @@ void ABHEnemyPoolManager::InitializePool()
 	}
 
 	const int32 InitialActiveCount = FMath::Min(ActiveEnemyLimit, PoolEnemies.Num());
+	const int32 InitialTrollCount = TrollEnemyClass
+		? GetDesiredTrollCount(InitialActiveCount)
+		: 0;
+	int32 ActivatedNormalCount = 0;
+	int32 ActivatedTrollCount = 0;
 	for (int32 ActiveIndex = 0; ActiveIndex < InitialActiveCount; ++ActiveIndex)
 	{
-		ABHEnemy* Enemy = AcquireFreeEnemy();
+		const bool bSpawnTroll = ActivatedTrollCount < InitialTrollCount
+			&& ActivatedNormalCount >= (ActivatedTrollCount + 1) * NormalEnemiesPerTroll;
+		const EPooledEnemyKind Kind = bSpawnTroll
+			? EPooledEnemyKind::Troll
+			: EPooledEnemyKind::Normal;
+		ABHEnemy* Enemy = AcquireFreeEnemy(Kind);
 		if (!ActivateEnemy(Enemy))
 		{
 			break;
+		}
+		if (Kind == EPooledEnemyKind::Troll)
+		{
+			++ActivatedTrollCount;
+		}
+		else
+		{
+			++ActivatedNormalCount;
 		}
 	}
 
 	UE_LOG(
 		LogProjectBH,
 		Display,
-		TEXT("%s initialized enemy pool. Spawned:%d Alive:%d Free:%d ActiveLimit:%d"),
+		TEXT("%s initialized enemy pool. Spawned:%d Alive:%d (Normal:%d Troll:%d) Free:%d ActiveLimit:%d"),
 		*GetName(),
 		PoolEnemies.Num(),
 		GetAliveEnemyCount(),
+		GetAliveNormalEnemyCount(),
+		GetAliveTrollCount(),
 		GetFreeEnemyCount(),
 		ActiveEnemyLimit);
 }
 
-ABHEnemy* ABHEnemyPoolManager::SpawnPooledEnemy(int32 PoolIndex)
+ABHEnemy* ABHEnemyPoolManager::SpawnPooledEnemy(
+	int32 PoolIndex,
+	TSubclassOf<ABHEnemy> PooledEnemyClass)
 {
 	UWorld* World = GetWorld();
-	if (!World || !EnemyClass)
+	if (!World || !PooledEnemyClass)
 	{
 		return nullptr;
 	}
 
 	const FTransform StorageTransform = GetStorageTransform(PoolIndex);
 	ABHEnemy* Enemy = World->SpawnActorDeferred<ABHEnemy>(
-		EnemyClass,
+		PooledEnemyClass,
 		StorageTransform,
 		this,
 		nullptr,
@@ -231,26 +276,54 @@ void ABHEnemyPoolManager::ReconcileRespawnDemand()
 	}
 
 	const int32 EffectiveLimit = FMath::Min(FMath::Max(1, ActiveEnemyLimit), PoolEnemies.Num());
-	const int32 MissingAliveCount = FMath::Max(0, EffectiveLimit - GetAliveEnemyCount());
-	while (PendingRespawns.Num() < MissingAliveCount)
-	{
-		FRespawnRequest& Request = PendingRespawns.AddDefaulted_GetRef();
-		Request.ReadyTime = GetWorld()->GetTimeSeconds() + FMath::Max(0.0f, RespawnDelay);
-		Request.Sequence = NextRespawnSequence++;
-	}
+	const int32 DesiredTrollCount = TrollEnemyClass
+		? GetDesiredTrollCount(EffectiveLimit)
+		: 0;
+	const int32 DesiredNormalCount = GetDesiredNormalCount(EffectiveLimit);
+	const int32 MissingNormalCount = FMath::Max(
+		0,
+		DesiredNormalCount - GetAliveEnemyCount(EPooledEnemyKind::Normal));
+	const int32 MissingTrollCount = FMath::Max(
+		0,
+		DesiredTrollCount - GetAliveEnemyCount(EPooledEnemyKind::Troll));
 
-	while (PendingRespawns.Num() > MissingAliveCount)
+	auto ReconcileKind = [this](EPooledEnemyKind Kind, int32 MissingCount)
 	{
-		int32 NewestIndex = 0;
-		for (int32 Index = 1; Index < PendingRespawns.Num(); ++Index)
+		int32 PendingCount = GetPendingRespawnCount(Kind);
+		while (PendingCount < MissingCount)
 		{
-			if (PendingRespawns[Index].Sequence > PendingRespawns[NewestIndex].Sequence)
-			{
-				NewestIndex = Index;
-			}
+			FRespawnRequest& Request = PendingRespawns.AddDefaulted_GetRef();
+			Request.ReadyTime = GetWorld()->GetTimeSeconds() + FMath::Max(0.0f, RespawnDelay);
+			Request.Sequence = NextRespawnSequence++;
+			Request.Kind = Kind;
+			++PendingCount;
 		}
-		PendingRespawns.RemoveAtSwap(NewestIndex, 1, EAllowShrinking::No);
-	}
+
+		while (PendingCount > MissingCount)
+		{
+			int32 NewestIndex = INDEX_NONE;
+			uint64 NewestSequence = 0;
+			for (int32 Index = 0; Index < PendingRespawns.Num(); ++Index)
+			{
+				if (PendingRespawns[Index].Kind == Kind
+					&& (NewestIndex == INDEX_NONE
+						|| PendingRespawns[Index].Sequence > NewestSequence))
+				{
+					NewestIndex = Index;
+					NewestSequence = PendingRespawns[Index].Sequence;
+				}
+			}
+			if (NewestIndex == INDEX_NONE)
+			{
+				break;
+			}
+			PendingRespawns.RemoveAtSwap(NewestIndex, 1, EAllowShrinking::No);
+			--PendingCount;
+		}
+	};
+
+	ReconcileKind(EPooledEnemyKind::Normal, MissingNormalCount);
+	ReconcileKind(EPooledEnemyKind::Troll, MissingTrollCount);
 }
 
 void ABHEnemyPoolManager::ProcessOneReadyRespawn()
@@ -278,11 +351,12 @@ void ABHEnemyPoolManager::ProcessOneReadyRespawn()
 		return;
 	}
 
-	ABHEnemy* Enemy = AcquireFreeEnemy();
+	const EPooledEnemyKind RequestedKind = PendingRespawns[OldestReadyIndex].Kind;
+	ABHEnemy* Enemy = AcquireFreeEnemy(RequestedKind);
 	const bool bReclaimedCorpse = Enemy == nullptr;
 	if (!Enemy)
 	{
-		Enemy = ReclaimOldestEligibleCorpse(CurrentTime);
+		Enemy = ReclaimOldestEligibleCorpse(CurrentTime, RequestedKind);
 	}
 	if (!Enemy)
 	{
@@ -302,32 +376,41 @@ void ABHEnemyPoolManager::ProcessOneReadyRespawn()
 	UE_LOG(
 		LogProjectBH,
 		Display,
-		TEXT("%s spawned replacement %s from %s. Alive:%d Free:%d Corpses:%d Pending:%d"),
+		TEXT("%s spawned %s replacement %s from %s. Alive:%d (Normal:%d Troll:%d) Free:%d Corpses:%d Pending:%d"),
 		*GetName(),
+		RequestedKind == EPooledEnemyKind::Troll ? TEXT("Troll") : TEXT("normal"),
 		*Enemy->GetName(),
 		bReclaimedCorpse ? TEXT("oldest corpse") : TEXT("free reserve"),
 		GetAliveEnemyCount(),
+		GetAliveNormalEnemyCount(),
+		GetAliveTrollCount(),
 		GetFreeEnemyCount(),
 		GetCorpseCount(),
 		GetPendingRespawnCount());
 }
 
-ABHEnemy* ABHEnemyPoolManager::AcquireFreeEnemy()
+ABHEnemy* ABHEnemyPoolManager::AcquireFreeEnemy(EPooledEnemyKind Kind)
 {
-	while (!FreeEnemies.IsEmpty())
+	for (int32 Index = FreeEnemies.Num() - 1; Index >= 0; --Index)
 	{
-		const int32 LastIndex = FreeEnemies.Num() - 1;
-		ABHEnemy* Enemy = FreeEnemies[LastIndex].Get();
-		FreeEnemies.RemoveAt(LastIndex, 1, EAllowShrinking::No);
-		if (IsValid(Enemy))
+		ABHEnemy* Enemy = FreeEnemies[Index].Get();
+		if (!IsValid(Enemy))
 		{
+			FreeEnemies.RemoveAtSwap(Index, 1, EAllowShrinking::No);
+			continue;
+		}
+		if (IsEnemyKind(Enemy, Kind))
+		{
+			FreeEnemies.RemoveAtSwap(Index, 1, EAllowShrinking::No);
 			return Enemy;
 		}
 	}
 	return nullptr;
 }
 
-ABHEnemy* ABHEnemyPoolManager::ReclaimOldestEligibleCorpse(float CurrentTime)
+ABHEnemy* ABHEnemyPoolManager::ReclaimOldestEligibleCorpse(
+	float CurrentTime,
+	EPooledEnemyKind Kind)
 {
 	int32 OldestIndex = INDEX_NONE;
 	uint64 OldestSequence = TNumericLimits<uint64>::Max();
@@ -335,6 +418,7 @@ ABHEnemy* ABHEnemyPoolManager::ReclaimOldestEligibleCorpse(float CurrentTime)
 	{
 		const FCorpseRecord& Record = Corpses[Index];
 		if (!Record.Enemy.IsValid()
+			|| !IsEnemyKind(Record.Enemy.Get(), Kind)
 			|| CurrentTime - Record.DeathTime < FMath::Max(0.0f, MinimumCorpseDisplayTime)
 			|| Record.Sequence >= OldestSequence)
 		{
@@ -356,6 +440,54 @@ ABHEnemy* ABHEnemyPoolManager::ReclaimOldestEligibleCorpse(float CurrentTime)
 		Enemy->DeactivateToPoolStorage(GetStorageTransform(PoolEnemies.IndexOfByKey(Enemy)));
 	}
 	return Enemy;
+}
+
+bool ABHEnemyPoolManager::IsEnemyKind(
+	const ABHEnemy* Enemy,
+	EPooledEnemyKind Kind) const
+{
+	if (!IsValid(Enemy))
+	{
+		return false;
+	}
+	const bool bIsTroll = TrollEnemyClass && Enemy->IsA(TrollEnemyClass);
+	return Kind == EPooledEnemyKind::Troll ? bIsTroll : !bIsTroll;
+}
+
+int32 ABHEnemyPoolManager::GetAliveEnemyCount(EPooledEnemyKind Kind) const
+{
+	int32 Count = 0;
+	for (const ABHEnemy* Enemy : PoolEnemies)
+	{
+		Count += IsEnemyKind(Enemy, Kind) && Enemy->IsPoolActive() ? 1 : 0;
+	}
+	return Count;
+}
+
+int32 ABHEnemyPoolManager::GetPendingRespawnCount(EPooledEnemyKind Kind) const
+{
+	int32 Count = 0;
+	for (const FRespawnRequest& Request : PendingRespawns)
+	{
+		Count += Request.Kind == Kind ? 1 : 0;
+	}
+	return Count;
+}
+
+int32 ABHEnemyPoolManager::GetDesiredTrollCount(int32 TotalCount) const
+{
+	if (!TrollEnemyClass || TotalCount <= 0)
+	{
+		return 0;
+	}
+	const int32 GroupSize = FMath::Max(1, NormalEnemiesPerTroll) + 1;
+	return FMath::Max(0, TotalCount) / GroupSize;
+}
+
+int32 ABHEnemyPoolManager::GetDesiredNormalCount(int32 TotalCount) const
+{
+	const int32 SafeTotal = FMath::Max(0, TotalCount);
+	return SafeTotal - GetDesiredTrollCount(SafeTotal);
 }
 
 bool ABHEnemyPoolManager::ActivateEnemy(ABHEnemy* Enemy)
@@ -474,11 +606,13 @@ void ABHEnemyPoolManager::DrawPoolDebug() const
 	const int32 TrackedTotal = AliveCount + FreeCount + CorpseCount;
 	const bool bCountsMatch = TrackedTotal == PoolEnemies.Num();
 	const FString DebugText = FString::Printf(
-		TEXT("Enemy Pool %d/%d | Alive:%d/%d Free:%d Corpses:%d Pending:%d | Sum:%d %s"),
+		TEXT("Enemy Pool %d/%d | Alive:%d/%d N:%d T:%d Free:%d Corpses:%d Pending:%d | Sum:%d %s"),
 		PoolEnemies.Num(),
 		PoolCapacity,
 		AliveCount,
 		FMath::Min(ActiveEnemyLimit, PoolEnemies.Num()),
+		GetAliveNormalEnemyCount(),
+		GetAliveTrollCount(),
 		FreeCount,
 		CorpseCount,
 		GetPendingRespawnCount(),

@@ -9,7 +9,7 @@
 class ABHEnemy;
 
 /**
- * Server-authoritative fixed enemy pool with corpse retention.
+ * Server-authoritative fixed Normal/Troll enemy pool with corpse retention.
  *
  * Alive enemies are capped independently from the total pooled actor count.
  * Dead actors stay visible until no hidden free actor remains for a replacement.
@@ -32,6 +32,12 @@ public:
 	int32 GetAliveEnemyCount() const;
 
 	UFUNCTION(BlueprintPure, Category = "Enemy Pool")
+	int32 GetAliveNormalEnemyCount() const;
+
+	UFUNCTION(BlueprintPure, Category = "Enemy Pool")
+	int32 GetAliveTrollCount() const;
+
+	UFUNCTION(BlueprintPure, Category = "Enemy Pool")
 	int32 GetFreeEnemyCount() const;
 
 	UFUNCTION(BlueprintPure, Category = "Enemy Pool")
@@ -41,9 +47,17 @@ public:
 	int32 GetPendingRespawnCount() const { return PendingRespawns.Num(); }
 
 protected:
-	/** One concrete BP_BHEnemy-derived class managed by this pool. */
+	/** Normal BP_BHEnemy-derived class managed by this pool. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Enemy Pool|Setup")
 	TSubclassOf<ABHEnemy> EnemyClass;
+
+	/** Optional BP_BHTroll-derived class inserted into the same pool population. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Enemy Pool|Setup")
+	TSubclassOf<ABHEnemy> TrollEnemyClass;
+
+	/** Place one Troll after each run of this many normal enemies. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Enemy Pool|Composition", meta = (ClampMin = "1", UIMin = "1"))
+	int32 NormalEnemiesPerTroll = 10;
 
 	/** Total actor count: alive + visible corpses + hidden free reserve. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Enemy Pool|Capacity", meta = (ClampMin = "1", UIMin = "1"))
@@ -88,6 +102,12 @@ protected:
 	bool bDrawPoolDebug = true;
 
 private:
+	enum class EPooledEnemyKind : uint8
+	{
+		Normal,
+		Troll
+	};
+
 	struct FCorpseRecord
 	{
 		TWeakObjectPtr<ABHEnemy> Enemy;
@@ -99,16 +119,24 @@ private:
 	{
 		float ReadyTime = 0.0f;
 		uint64 Sequence = 0;
+		EPooledEnemyKind Kind = EPooledEnemyKind::Normal;
 	};
 
 	void InitializePool();
 	void ResolveSpawnPoints();
-	ABHEnemy* SpawnPooledEnemy(int32 PoolIndex);
+	ABHEnemy* SpawnPooledEnemy(
+		int32 PoolIndex,
+		TSubclassOf<ABHEnemy> PooledEnemyClass);
 	void ReconcileRespawnDemand();
 	void ProcessOneReadyRespawn();
-	ABHEnemy* AcquireFreeEnemy();
-	ABHEnemy* ReclaimOldestEligibleCorpse(float CurrentTime);
+	ABHEnemy* AcquireFreeEnemy(EPooledEnemyKind Kind);
+	ABHEnemy* ReclaimOldestEligibleCorpse(float CurrentTime, EPooledEnemyKind Kind);
 	bool ActivateEnemy(ABHEnemy* Enemy);
+	bool IsEnemyKind(const ABHEnemy* Enemy, EPooledEnemyKind Kind) const;
+	int32 GetAliveEnemyCount(EPooledEnemyKind Kind) const;
+	int32 GetPendingRespawnCount(EPooledEnemyKind Kind) const;
+	int32 GetDesiredTrollCount(int32 TotalCount) const;
+	int32 GetDesiredNormalCount(int32 TotalCount) const;
 	FTransform GetNextSpawnTransform();
 	FTransform GetStorageTransform(int32 PoolIndex) const;
 	void PruneInvalidEntries();
