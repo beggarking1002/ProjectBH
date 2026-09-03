@@ -89,6 +89,9 @@ public:
 		FVector& OutMoveGoal,
 		EBHCombatMoveRouteStage& OutRouteStage) const;
 
+	/** True while this requester must clear a recently exited choke before settling or attacking. */
+	bool IsRequesterInExitDecompression(AActor* Requester) const;
+
 	/** True when a new Wait movement leg would overlap an active Attack ingress path. */
 	bool ShouldDeferWaitIngress(
 		AActor* WaitRequester,
@@ -431,9 +434,9 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Exit Decompression", meta = (ClampMin = "0.0", Units = "cm"))
 	float ExitDecompressionOriginBacktrackDistance = 200.0f;
 
-	/** Distance past the frozen exit plane that an Enemy must clear before normal slot routing resumes. */
+	/** Distance past the frozen exit plane that every captured Enemy must clear before normal slot routing resumes. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Exit Decompression", meta = (ClampMin = "0.0", Units = "cm"))
-	float ExitDecompressionCompletionDistance = 220.0f;
+	float ExitDecompressionCompletionDistance = 320.0f;
 
 	/** Base forward distance of the frozen fan waypoint measured from the exit plane. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Exit Decompression", meta = (ClampMin = "1.0", Units = "cm"))
@@ -458,6 +461,10 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Exit Decompression", meta = (ClampMin = "0.0", Units = "cm"))
 	float ExitDecompressionCaptureHalfWidth = 300.0f;
 
+	/** Half-width of the temporary no-parking lane kept open between the mouth and the exit fan. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Exit Decompression", meta = (ClampMin = "0.0", Units = "cm"))
+	float ExitDecompressionNoParkingHalfWidth = 90.0f;
+
 	/** Required traversable width across the exit axis before an Enemy may resume final slot routing. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Exit Decompression", meta = (ClampMin = "0.0", Units = "cm"))
 	float ExitDecompressionMinimumLateralClearance = 250.0f;
@@ -466,11 +473,7 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Exit Decompression", meta = (ClampMin = "1.0", Units = "cm"))
 	float ExitDecompressionClearanceProbeDistance = 250.0f;
 
-	/** Raw fan-goal proximity that also completes transit, even when local clearance remains asymmetric. */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Exit Decompression", meta = (ClampMin = "1.0", Units = "cm"))
-	float ExitDecompressionGoalArrivalRadius = 60.0f;
-
-	/** Safety timeout for malformed or unusually long exits. */
+	/** Delay before unreachable fan paths are removed from the group barrier; valid followers are never timed out. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Exit Decompression", meta = (ClampMin = "0.1", Units = "s"))
 	float ExitDecompressionTimeout = 3.0f;
 
@@ -789,6 +792,12 @@ private:
 		int32 LaneCount = 0;
 	};
 
+	struct FExitDecompressionRequester
+	{
+		TWeakObjectPtr<AActor> Requester;
+		int32 FanOrdinal = INDEX_NONE;
+	};
+
 	void InitializeSlots();
 	void UpdateCombatSpaceAnalysis(float DeltaTime);
 	void AnalyzeCombatSpace(float SampleDeltaTime);
@@ -811,12 +820,13 @@ private:
 		EBHCombatSlotType SlotType);
 	void BeginExitDecompression(EBHCombatSpaceMode PreviousMode);
 	void UpdateExitDecompression();
-	bool IsRequesterInExitDecompression(AActor* Requester) const;
+	void StopExitDecompression();
+	bool ShouldCaptureExitDecompressionRequester(AActor* Requester) const;
+	bool HasRequesterClearedExitDecompression(AActor* Requester) const;
+	bool IsLocationInsideExitDecompressionNoParkingLane(const FVector& Location) const;
 	bool HasExitDecompressionClearance(const FVector& RequesterLocation) const;
 	bool ResolveExitDecompressionGoal(
 		AActor* Requester,
-		EBHCombatSlotType SlotType,
-		EBHCombatMoveRouteStage PreviousRouteStage,
 		FVector& OutMoveGoal,
 		EBHCombatMoveRouteStage& OutRouteStage) const;
 	bool GetExitDecompressionDesiredGoal(AActor* Requester, FVector& OutDesiredGoal) const;
@@ -1045,9 +1055,11 @@ private:
 	float CoreIntrusionBlockedUntil = 0.0f;
 	float PocketRapidReformUntil = 0.0f;
 	bool bExitDecompressionActive = false;
+	bool bExitDecompressionFailSafeApplied = false;
 	float ExitDecompressionStartTime = 0.0f;
 	FVector ExitDecompressionOrigin = FVector::ZeroVector;
 	FVector ExitDecompressionForward = FVector::ForwardVector;
+	TArray<FExitDecompressionRequester> ExitDecompressionRequesters;
 	FVector LastMeaningfulOwnerMoveDirection = FVector::ForwardVector;
 	float LastMeaningfulOwnerMoveTime = -BIG_NUMBER;
 	FVector OpenFrontFillDirection = FVector::ForwardVector;

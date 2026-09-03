@@ -476,6 +476,8 @@ void ABHCrowdEnemyAIController::RefreshTargetAndMove()
 		CurrentTarget->GetActorLocation());
 	LastDistanceToSlot = DistanceToTarget;
 	if (CurrentSlotType == EBHCombatSlotType::Attack
+		&& (!CurrentSlotComponent
+			|| !CurrentSlotComponent->IsRequesterInExitDecompression(ControlledEnemy))
 		&& ControlledEnemy->TryStartChargeAttack(CurrentTarget))
 	{
 		ResetPursuitTracking();
@@ -1325,6 +1327,9 @@ bool ABHCrowdEnemyAIController::TryStartMovingAttack(
 		|| !IsValid(CurrentTarget)
 		|| CurrentSlotType != EBHCombatSlotType::Attack
 		|| bEscapingCombatCore
+		|| CurrentMoveRouteStage == EBHCombatMoveRouteStage::ExitDecompression
+		|| (CurrentSlotComponent
+			&& CurrentSlotComponent->IsRequesterInExitDecompression(ControlledEnemy))
 		|| ControlledEnemy->IsAttackLocked()
 		|| !ControlledEnemy->IsMovingAttackEnabled()
 		|| DistanceToTarget > ControlledEnemy->GetMovingAttackStartRange()

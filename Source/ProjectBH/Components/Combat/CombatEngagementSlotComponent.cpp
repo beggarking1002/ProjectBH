@@ -10,6 +10,7 @@
 #include "../../BHHeroCharacter.h"
 #include "../../Enemies/BHEnemy.h"
 #include "../../ProjectBH.h"
+#include "Algo/AllOf.h"
 #include "AI/NavigationSystemBase.h"
 #include "Components/CapsuleComponent.h"
 #include "DrawDebugHelpers.h"
@@ -42,6 +43,7 @@ void UCombatEngagementSlotComponent::EndPlay(const EEndPlayReason::Type EndPlayR
 	AttackHandoverBlockedUntil.Reset();
 	WaitReservations.Reset();
 	HoldingReservations.Reset();
+	ExitDecompressionRequesters.Reset();
 	ResetCoreIntrusionHandoverTracking();
 	EngagementQueue.Reset();
 	SpaceProbeEndpoints.Reset();
@@ -680,13 +682,17 @@ void UCombatEngagementSlotComponent::HandleCombatSpaceModeChanged(EBHCombatSpace
 		return;
 	}
 	const AActor* Owner = GetOwner();
-	if (CurrentSpaceMode == EBHCombatSpaceMode::Open)
+	const bool bLeftCorridor = PreviousMode == EBHCombatSpaceMode::Corridor
+		&& CurrentSpaceMode != EBHCombatSpaceMode::Corridor;
+	const bool bEnteredOpenFromConstrained = CurrentSpaceMode == EBHCombatSpaceMode::Open
+		&& PreviousMode != EBHCombatSpaceMode::Open;
+	if (bLeftCorridor || bEnteredOpenFromConstrained)
 	{
 		BeginExitDecompression(PreviousMode);
 	}
-	else
+	else if (CurrentSpaceMode == EBHCombatSpaceMode::Corridor)
 	{
-		bExitDecompressionActive = false;
+		StopExitDecompression();
 	}
 	if (CurrentSpaceMode != EBHCombatSpaceMode::Corridor)
 	{
@@ -3450,6 +3456,15 @@ bool UCombatEngagementSlotComponent::GetMoveGoalForReservedSlot(
 		return false;
 	}
 	const FVector RequesterLocation = Requester->GetActorLocation();
+	if (ResolveExitDecompressionGoal(
+		Requester,
+		OutMoveGoal,
+		OutRouteStage))
+	{
+		// The exit lane is a group barrier. Even Attack owners and large enemies
+		// keep their reservation but clear the mouth before any core or slot route.
+		return true;
+	}
 	if (SlotType == EBHCombatSlotType::Attack
 		&& CanUseDirectAttackCoreExit(Requester, FinalSlotLocation))
 	{
@@ -3464,15 +3479,6 @@ bool UCombatEngagementSlotComponent::GetMoveGoalForReservedSlot(
 			Requester,
 			OutMoveGoal,
 			OutRouteStage);
-	}
-	if (ResolveExitDecompressionGoal(
-		Requester,
-		SlotType,
-		PreviousRouteStage,
-		OutMoveGoal,
-		OutRouteStage))
-	{
-		return true;
 	}
 	if (IsCorridorFormationActive())
 	{
@@ -4079,6 +4085,12 @@ void UCombatEngagementSlotComponent::ReleaseSlot(AActor* Requester, bool bPreser
 	if (!bPreserveQueuePosition)
 	{
 		RemoveQueueRequester(Requester);
+		ExitDecompressionRequesters.RemoveAllSwap(
+			[Requester](const FExitDecompressionRequester& Candidate)
+			{
+				return Candidate.Requester.Get() == Requester;
+			},
+			EAllowShrinking::No);
 	}
 	if (EngagementQueue.IsEmpty())
 	{
@@ -5387,7 +5399,8 @@ bool UCombatEngagementSlotComponent::PromoteBestOuterRequesterToWait()
 		if (!GetSlotWorldLocation(
 			EBHCombatSlotType::Wait,
 			WaitSlotIndex,
-			WaitSlotLocation))
+			WaitSlotLocation)
+			|| IsLocationInsideExitDecompressionNoParkingLane(WaitSlotLocation))
 		{
 			continue;
 		}
@@ -5486,7 +5499,8 @@ bool UCombatEngagementSlotComponent::AssignBestPendingRequesterToHolding()
 		if (!GetSlotWorldLocation(
 			EBHCombatSlotType::Holding,
 			HoldingSlotIndex,
-			HoldingSlotLocation))
+			HoldingSlotLocation)
+			|| IsLocationInsideExitDecompressionNoParkingLane(HoldingSlotLocation))
 		{
 			continue;
 		}
@@ -5905,6 +5919,27 @@ void UCombatEngagementSlotComponent::RegisterQueueRequester(AActor* Requester)
 	FEngagementQueueEntry& Entry = EngagementQueue.AddDefaulted_GetRef();
 	Entry.Requester = Requester;
 	Entry.Sequence = NextQueueSequence++;
+	if (bExitDecompressionActive
+		&& ShouldCaptureExitDecompressionRequester(Requester))
+	{
+		const bool bAlreadyCaptured = ExitDecompressionRequesters.ContainsByPredicate(
+			[Requester](const FExitDecompressionRequester& Candidate)
+			{
+				return Candidate.Requester.Get() == Requester;
+			});
+		if (!bAlreadyCaptured)
+		{
+			FExitDecompressionRequester& CapturedRequester =
+				ExitDecompressionRequesters.AddDefaulted_GetRef();
+			CapturedRequester.Requester = Requester;
+			CapturedRequester.FanOrdinal = ExitDecompressionRequesters.Num() - 1;
+			bExitDecompressionFailSafeApplied = false;
+			if (const UWorld* World = GetWorld())
+			{
+				ExitDecompressionStartTime = World->GetTimeSeconds();
+			}
+		}
+	}
 	if (IsCorridorFormationActive())
 	{
 		AssignCorridorSideIndices(false);
@@ -6418,7 +6453,8 @@ void UCombatEngagementSlotComponent::BeginExitDecompression(EBHCombatSpaceMode P
 	if (!bEnableExitDecompression
 		|| !Owner
 		|| !World
-		|| PreviousMode == EBHCombatSpaceMode::Open)
+		|| PreviousMode == EBHCombatSpaceMode::Open
+		|| bExitDecompressionActive)
 	{
 		return;
 	}
@@ -6455,6 +6491,32 @@ void UCombatEngagementSlotComponent::BeginExitDecompression(EBHCombatSpaceMode P
 		ExitDecompressionOrigin = DesiredOrigin;
 	}
 	ExitDecompressionStartTime = CurrentTime;
+	bExitDecompressionFailSafeApplied = false;
+	ExitDecompressionRequesters.Reset();
+	for (const FEngagementQueueEntry& Entry : EngagementQueue)
+	{
+		AActor* Requester = Entry.Requester.Get();
+		if (ShouldCaptureExitDecompressionRequester(Requester))
+		{
+			FExitDecompressionRequester& CapturedRequester =
+				ExitDecompressionRequesters.AddDefaulted_GetRef();
+			CapturedRequester.Requester = Requester;
+		}
+	}
+	ExitDecompressionRequesters.Sort(
+		[this](const FExitDecompressionRequester& Left, const FExitDecompressionRequester& Right)
+		{
+			return GetQueueSequence(Left.Requester.Get())
+				< GetQueueSequence(Right.Requester.Get());
+		});
+	for (int32 Index = 0; Index < ExitDecompressionRequesters.Num(); ++Index)
+	{
+		ExitDecompressionRequesters[Index].FanOrdinal = Index;
+	}
+	if (ExitDecompressionRequesters.IsEmpty())
+	{
+		return;
+	}
 	bExitDecompressionActive = true;
 	++FormationRevision;
 	NotifyAllReservedRequestersSlotChanged();
@@ -6462,9 +6524,10 @@ void UCombatEngagementSlotComponent::BeginExitDecompression(EBHCombatSpaceMode P
 	UE_LOG(
 		LogProjectBH,
 		Verbose,
-		TEXT("%s started exit decompression from %s."),
+		TEXT("%s started exit decompression from %s with %d captured requesters."),
 		*Owner->GetName(),
-		*StaticEnum<EBHCombatSpaceMode>()->GetNameStringByValue(static_cast<int64>(PreviousMode)));
+		*StaticEnum<EBHCombatSpaceMode>()->GetNameStringByValue(static_cast<int64>(PreviousMode)),
+		ExitDecompressionRequesters.Num());
 }
 
 void UCombatEngagementSlotComponent::UpdateExitDecompression()
@@ -6475,16 +6538,157 @@ void UCombatEngagementSlotComponent::UpdateExitDecompression()
 		return;
 	}
 
-	if (CurrentSpaceMode == EBHCombatSpaceMode::Open
-		&& World->GetTimeSeconds() - ExitDecompressionStartTime
-			< FMath::Max(0.1f, ExitDecompressionTimeout))
+	if (CurrentSpaceMode == EBHCombatSpaceMode::Corridor)
+	{
+		StopExitDecompression();
+		return;
+	}
+
+	ExitDecompressionRequesters.RemoveAllSwap(
+		[](const FExitDecompressionRequester& Requester)
+		{
+			return !Requester.Requester.IsValid();
+		},
+		EAllowShrinking::No);
+
+	const float Elapsed = World->GetTimeSeconds() - ExitDecompressionStartTime;
+	if (!bExitDecompressionFailSafeApplied
+		&& Elapsed >= FMath::Max(0.1f, ExitDecompressionTimeout))
+	{
+		bExitDecompressionFailSafeApplied = true;
+		bool bRemovedUnreachableRequester = false;
+		for (int32 Index = ExitDecompressionRequesters.Num() - 1; Index >= 0; --Index)
+		{
+			AActor* Requester = ExitDecompressionRequesters[Index].Requester.Get();
+			if (!Requester || HasRequesterClearedExitDecompression(Requester))
+			{
+				continue;
+			}
+
+			FVector ResolvedGoal;
+			EBHCombatMoveRouteStage ResolvedStage = EBHCombatMoveRouteStage::Direct;
+			const bool bHasFanPath = ResolveExitDecompressionGoal(
+				Requester,
+				ResolvedGoal,
+				ResolvedStage);
+			if (!bHasFanPath)
+			{
+				ExitDecompressionRequesters.RemoveAtSwap(Index, 1, EAllowShrinking::No);
+				bRemovedUnreachableRequester = true;
+			}
+		}
+		if (bRemovedUnreachableRequester)
+		{
+			++FormationRevision;
+			NotifyAllReservedRequestersSlotChanged();
+		}
+	}
+
+	const bool bAllCapturedRequestersClear = ExitDecompressionRequesters.IsEmpty()
+		|| Algo::AllOf(
+			ExitDecompressionRequesters,
+			[this](const FExitDecompressionRequester& Requester)
+			{
+				return !Requester.Requester.IsValid()
+					|| HasRequesterClearedExitDecompression(Requester.Requester.Get());
+			});
+	if (bAllCapturedRequestersClear)
+	{
+		StopExitDecompression();
+	}
+}
+
+void UCombatEngagementSlotComponent::StopExitDecompression()
+{
+	if (!bExitDecompressionActive && ExitDecompressionRequesters.IsEmpty())
 	{
 		return;
 	}
 
 	bExitDecompressionActive = false;
+	bExitDecompressionFailSafeApplied = false;
+	ExitDecompressionRequesters.Reset();
 	++FormationRevision;
 	NotifyAllReservedRequestersSlotChanged();
+}
+
+bool UCombatEngagementSlotComponent::ShouldCaptureExitDecompressionRequester(
+	AActor* Requester) const
+{
+	if (!IsValid(Requester))
+	{
+		return false;
+	}
+
+	const FVector Forward = ExitDecompressionForward.GetSafeNormal2D();
+	if (Forward.IsNearlyZero())
+	{
+		return false;
+	}
+
+	const FVector Right(-Forward.Y, Forward.X, 0.0f);
+	const FVector RelativeLocation = Requester->GetActorLocation() - ExitDecompressionOrigin;
+	const float ForwardDistance = FVector::DotProduct(RelativeLocation, Forward);
+	const float LateralDistance = FMath::Abs(FVector::DotProduct(RelativeLocation, Right));
+	const bool bHasOpenClearance = HasExitDecompressionClearance(Requester->GetActorLocation());
+	return !(ForwardDistance >= FMath::Max(0.0f, ExitDecompressionCompletionDistance)
+		&& bHasOpenClearance)
+		&& !(LateralDistance > FMath::Max(0.0f, ExitDecompressionCaptureHalfWidth)
+			&& bHasOpenClearance);
+}
+
+bool UCombatEngagementSlotComponent::HasRequesterClearedExitDecompression(
+	AActor* Requester) const
+{
+	if (!IsValid(Requester))
+	{
+		return true;
+	}
+
+	const FVector Forward = ExitDecompressionForward.GetSafeNormal2D();
+	if (Forward.IsNearlyZero())
+	{
+		return true;
+	}
+
+	const FVector Right(-Forward.Y, Forward.X, 0.0f);
+	const FVector RelativeLocation = Requester->GetActorLocation() - ExitDecompressionOrigin;
+	const float ForwardDistance = FVector::DotProduct(RelativeLocation, Forward);
+	const float LateralDistance = FMath::Abs(FVector::DotProduct(RelativeLocation, Right));
+	if (ForwardDistance < FMath::Max(0.0f, ExitDecompressionCompletionDistance)
+		&& LateralDistance <= FMath::Max(0.0f, ExitDecompressionCaptureHalfWidth))
+	{
+		return false;
+	}
+
+	const bool bHasOpenClearance = HasExitDecompressionClearance(Requester->GetActorLocation());
+	return bHasOpenClearance
+		&& (ForwardDistance >= FMath::Max(0.0f, ExitDecompressionCompletionDistance)
+			|| LateralDistance > FMath::Max(0.0f, ExitDecompressionCaptureHalfWidth));
+}
+
+bool UCombatEngagementSlotComponent::IsLocationInsideExitDecompressionNoParkingLane(
+	const FVector& Location) const
+{
+	if (!bExitDecompressionActive)
+	{
+		return false;
+	}
+
+	const FVector Forward = ExitDecompressionForward.GetSafeNormal2D();
+	if (Forward.IsNearlyZero())
+	{
+		return false;
+	}
+	const FVector Right(-Forward.Y, Forward.X, 0.0f);
+	const FVector RelativeLocation = Location - ExitDecompressionOrigin;
+	const float ForwardDistance = FVector::DotProduct(RelativeLocation, Forward);
+	const float LateralDistance = FMath::Abs(FVector::DotProduct(RelativeLocation, Right));
+	return ForwardDistance >= 0.0f
+		&& ForwardDistance <= FMath::Max(
+			ExitDecompressionCompletionDistance,
+			ExitDecompressionGoalDistance)
+		&& LateralDistance <= FMath::Max(0.0f, ExitDecompressionNoParkingHalfWidth);
 }
 
 bool UCombatEngagementSlotComponent::HasExitDecompressionClearance(
@@ -6531,78 +6735,24 @@ bool UCombatEngagementSlotComponent::HasExitDecompressionClearance(
 
 bool UCombatEngagementSlotComponent::IsRequesterInExitDecompression(AActor* Requester) const
 {
-	const UWorld* World = GetWorld();
-	if (!bExitDecompressionActive
-		|| !Requester
-		|| !World
-		|| CurrentSpaceMode != EBHCombatSpaceMode::Open
-		|| World->GetTimeSeconds() - ExitDecompressionStartTime
-			>= FMath::Max(0.1f, ExitDecompressionTimeout))
+	if (!bExitDecompressionActive || !Requester)
 	{
 		return false;
 	}
 
-	int32 ExistingAttackSlot = INDEX_NONE;
-	if (FindReservation(AttackReservations, Requester, ExistingAttackSlot))
-	{
-		return false;
-	}
-
-	const FVector Forward = ExitDecompressionForward.GetSafeNormal2D();
-	if (Forward.IsNearlyZero())
-	{
-		return false;
-	}
-	const FVector Right(-Forward.Y, Forward.X, 0.0f);
-	const FVector RelativeLocation = Requester->GetActorLocation() - ExitDecompressionOrigin;
-	const float ForwardDistance = FVector::DotProduct(RelativeLocation, Forward);
-	const float LateralDistance = FMath::Abs(FVector::DotProduct(RelativeLocation, Right));
-	FVector RawFanGoal;
-	if (GetExitDecompressionDesiredGoal(Requester, RawFanGoal))
-	{
-		const float GoalArrivalRadius = FMath::Max(1.0f, ExitDecompressionGoalArrivalRadius);
-		const FVector CenterFanGoal = ExitDecompressionOrigin
-			+ Forward * FVector::DotProduct(RawFanGoal - ExitDecompressionOrigin, Forward);
-		if (FVector::DistSquared2D(Requester->GetActorLocation(), RawFanGoal)
-				<= FMath::Square(GoalArrivalRadius)
-			|| FVector::DistSquared2D(Requester->GetActorLocation(), CenterFanGoal)
-				<= FMath::Square(GoalArrivalRadius))
+	return ExitDecompressionRequesters.ContainsByPredicate(
+		[Requester](const FExitDecompressionRequester& Candidate)
 		{
-			return false;
-		}
-	}
-	if (ForwardDistance < FMath::Max(0.0f, ExitDecompressionCompletionDistance)
-		&& LateralDistance <= FMath::Max(0.0f, ExitDecompressionCaptureHalfWidth))
-	{
-		// Most compressed followers are unambiguously still inside the phase. Do
-		// not repeat two Nav raycasts for every Attack-admission candidate pair.
-		return true;
-	}
-	const bool bHasOpenClearance = HasExitDecompressionClearance(Requester->GetActorLocation());
-	if (ForwardDistance >= FMath::Max(0.0f, ExitDecompressionCompletionDistance)
-		&& bHasOpenClearance)
-	{
-		return false;
-	}
-	if (LateralDistance > FMath::Max(0.0f, ExitDecompressionCaptureHalfWidth)
-		&& bHasOpenClearance)
-	{
-		// This requester has already spread into a valid side area. Pulling it back
-		// toward the frozen mouth axis would recreate the cross-traffic we avoid.
-		return false;
-	}
-	return true;
+			return Candidate.Requester.Get() == Requester;
+		});
 }
 
 bool UCombatEngagementSlotComponent::ResolveExitDecompressionGoal(
 	AActor* Requester,
-	EBHCombatSlotType SlotType,
-	EBHCombatMoveRouteStage PreviousRouteStage,
 	FVector& OutMoveGoal,
 	EBHCombatMoveRouteStage& OutRouteStage) const
 {
-	if (SlotType == EBHCombatSlotType::Attack
-		|| !IsRequesterInExitDecompression(Requester))
+	if (!IsRequesterInExitDecompression(Requester))
 	{
 		return false;
 	}
@@ -6656,26 +6806,35 @@ bool UCombatEngagementSlotComponent::GetExitDecompressionDesiredGoal(
 	const FVector Right(-Forward.Y, Forward.X, 0.0f);
 	const int32 LaneCount = FMath::Clamp(ExitDecompressionLaneCount, 1, 7);
 	const int32 RowCount = FMath::Clamp(ExitDecompressionRowCount, 1, 8);
-	const uint64 Sequence = GetQueueSequence(Requester);
-	const uint64 StableSequence = Sequence == TNumericLimits<uint64>::Max()
-		? static_cast<uint64>(Requester->GetUniqueID())
-		: (Sequence > 0 ? Sequence - 1 : 0);
-	const int32 LaneOrdinal = static_cast<int32>(StableSequence % static_cast<uint64>(LaneCount));
-	const int32 RowIndex = static_cast<int32>(
-		(StableSequence / static_cast<uint64>(LaneCount)) % static_cast<uint64>(RowCount));
-
-	float LaneCoordinate = static_cast<float>(LaneOrdinal)
-		- 0.5f * static_cast<float>(LaneCount - 1);
-	if ((LaneCount & 1) != 0)
+	int32 FanOrdinal = INDEX_NONE;
+	for (const FExitDecompressionRequester& CapturedRequester : ExitDecompressionRequesters)
 	{
-		// Odd lane counts fill center, left, right, then the outer pair. This lets
-		// the first compressed arrivals advance without all choosing one side.
-		LaneCoordinate = LaneOrdinal == 0
-			? 0.0f
-			: (LaneOrdinal % 2 == 1
-				? -static_cast<float>((LaneOrdinal + 1) / 2)
-				: static_cast<float>(LaneOrdinal / 2));
+		if (CapturedRequester.Requester.Get() == Requester)
+		{
+			FanOrdinal = CapturedRequester.FanOrdinal;
+			break;
+		}
 	}
+	if (FanOrdinal == INDEX_NONE)
+	{
+		return false;
+	}
+
+	const int32 BaseCapacity = LaneCount * RowCount;
+	const int32 LateralBand = FanOrdinal / BaseCapacity;
+	const int32 BaseOrdinal = FanOrdinal % BaseCapacity;
+	const int32 LaneOrdinal = BaseOrdinal % LaneCount;
+	const int32 RowIndex = BaseOrdinal / LaneCount;
+	const int32 GlobalLaneOrdinal = LateralBand * LaneCount + LaneOrdinal;
+
+	// Every overflow band adds new alternating side lanes instead of reusing the
+	// first 3 x 4 goals. This keeps large crowds from manufacturing a second
+	// overlap bottleneck at the fan.
+	const float LaneCoordinate = GlobalLaneOrdinal == 0
+		? 0.0f
+		: (GlobalLaneOrdinal % 2 == 1
+			? -static_cast<float>((GlobalLaneOrdinal + 1) / 2)
+			: static_cast<float>(GlobalLaneOrdinal / 2));
 
 	const float ForwardDistance = FMath::Max(1.0f, ExitDecompressionGoalDistance)
 		+ static_cast<float>(RowIndex) * FMath::Max(0.0f, ExitDecompressionRowSpacing);
@@ -6911,6 +7070,16 @@ bool UCombatEngagementSlotComponent::CanRequesterOccupyAttackSlot(
 	{
 		return false;
 	}
+	FVector AttackSlotLocation;
+	if (ExistingOwner != Requester
+		&& GetSlotWorldLocation(
+			EBHCombatSlotType::Attack,
+			AttackSlotIndex,
+			AttackSlotLocation)
+		&& IsLocationInsideExitDecompressionNoParkingLane(AttackSlotLocation))
+	{
+		return false;
+	}
 
 	int32 ExistingCost = 0;
 	int32 SameSizeAttackerCount = 0;
@@ -7064,7 +7233,8 @@ bool UCombatEngagementSlotComponent::TryReserveSlot(
 		{
 			continue;
 		}
-		if (IsSlotBlockedByLargeEnemyWedge(Requester, SlotLocation))
+		if (IsSlotBlockedByLargeEnemyWedge(Requester, SlotLocation)
+			|| IsLocationInsideExitDecompressionNoParkingLane(SlotLocation))
 		{
 			continue;
 		}
@@ -8237,7 +8407,7 @@ void UCombatEngagementSlotComponent::DrawDebugSlots() const
 	}
 
 	const FString DebugText = FString::Printf(
-		TEXT("Slots A:%d/%d Cost:%d/%d Blocked:%d SideHold:%d W:%d/%d H:%d/%d Q:%d | Phase:%s | Reform:%d | Attacking:%d NonAttack:%d | Spacing:%d Peak:%d | VacA:%.1f Promote:%s"),
+		TEXT("Slots A:%d/%d Cost:%d/%d Blocked:%d SideHold:%d W:%d/%d H:%d/%d Q:%d | Phase:%s Egress:%d | Reform:%d | Attacking:%d NonAttack:%d | Spacing:%d Peak:%d | VacA:%.1f Promote:%s"),
 		OccupiedAttackSlots,
 		ActiveAttackSlotCount,
 		GetOccupiedAttackSlotCost(),
@@ -8250,6 +8420,7 @@ void UCombatEngagementSlotComponent::DrawDebugSlots() const
 		HoldingReservations.Num(),
 		PendingRequesterCount,
 		IsInitialFormationActive() ? TEXT("Initial") : TEXT("Runtime"),
+		bExitDecompressionActive ? ExitDecompressionRequesters.Num() : 0,
 		FormationRevision,
 		CurrentAttackingEnemyCount,
 		CurrentNonAttackSlotAttackerCount,
@@ -8457,6 +8628,29 @@ void UCombatEngagementSlotComponent::DrawCombatSpaceAnalysisDebug() const
 			0.12f,
 			0,
 			5.0f);
+		const float NoParkingHalfWidth = FMath::Max(0.0f, ExitDecompressionNoParkingHalfWidth);
+		const float NoParkingLength = FMath::Max(
+			ExitDecompressionCompletionDistance,
+			ExitDecompressionGoalDistance);
+		const FVector LaneEnd = EgressDrawOrigin + ExitDecompressionForward * NoParkingLength;
+		DrawDebugLine(
+			World,
+			EgressDrawOrigin - EgressRight * NoParkingHalfWidth,
+			LaneEnd - EgressRight * NoParkingHalfWidth,
+			FColor(80, 255, 160),
+			false,
+			0.12f,
+			0,
+			2.0f);
+		DrawDebugLine(
+			World,
+			EgressDrawOrigin + EgressRight * NoParkingHalfWidth,
+			LaneEnd + EgressRight * NoParkingHalfWidth,
+			FColor(80, 255, 160),
+			false,
+			0.12f,
+			0,
+			2.0f);
 	}
 
 	const auto ResolveModeText = [](EBHCombatSpaceMode Mode)
