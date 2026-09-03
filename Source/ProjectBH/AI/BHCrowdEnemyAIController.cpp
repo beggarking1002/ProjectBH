@@ -23,6 +23,7 @@ bool IsIntermediateCombatRouteStage(EBHCombatMoveRouteStage RouteStage)
 {
 	switch (RouteStage)
 	{
+	case EBHCombatMoveRouteStage::ExitDecompression:
 	case EBHCombatMoveRouteStage::ApproachRing:
 	case EBHCombatMoveRouteStage::AlignOnRing:
 	case EBHCombatMoveRouteStage::BypassCorePositive:
@@ -199,6 +200,10 @@ void ABHCrowdEnemyAIController::OnMoveCompleted(FAIRequestID RequestID, const FP
 			Warning,
 			TEXT("%s could not reach its reserved combat slot; attempting slot recovery."),
 			*GetName());
+		if (TryStartHighGroundDropRecovery(Cast<ABHEnemy>(GetPawn())))
+		{
+			return;
+		}
 		if (CurrentSlotType == EBHCombatSlotType::Attack)
 		{
 			RecoverStalledCombatSlot(Cast<ABHEnemy>(GetPawn()));
@@ -358,6 +363,16 @@ void ABHCrowdEnemyAIController::RefreshTargetAndMove()
 		}
 	}
 
+	if (ControlledEnemy->IsHighGroundDropActive())
+	{
+		if (IsValid(CurrentTarget))
+		{
+			SetFocus(CurrentTarget, EAIFocusPriority::Gameplay);
+		}
+		DrawDebugStatus(ControlledEnemy);
+		return;
+	}
+
 	if (ControlledEnemy->IsAttackLocked() && !ControlledEnemy->CanMoveDuringAttack())
 	{
 		if (ControlledEnemy->GetCombatState() == EBHEnemyCombatState::Recovering
@@ -491,6 +506,11 @@ void ABHCrowdEnemyAIController::RefreshTargetAndMove()
 			ControlledEnemy->CanMoveDuringAttack());
 		if (UpdatePursuitStuckWatchdog(ControlledEnemy))
 		{
+			if (TryStartHighGroundDropRecovery(ControlledEnemy))
+			{
+				DrawDebugStatus(ControlledEnemy);
+				return;
+			}
 			// Refresh both the path corridor and pursuit axis. The stable lane/row
 			// identity remains unchanged; only the stale route is discarded.
 			StopMovement();
@@ -614,8 +634,9 @@ void ABHCrowdEnemyAIController::RefreshTargetAndMove()
 	{
 		CurrentFormationMovementRole = EBHFormationMovementRole::StationaryHolding;
 	}
-
-	if (CurrentSlotType == EBHCombatSlotType::Wait && !bAtReservedSlot)
+	if (CurrentSlotType == EBHCombatSlotType::Wait
+		&& !bAtReservedSlot
+		&& CurrentMoveRouteStage != EBHCombatMoveRouteStage::ExitDecompression)
 	{
 		// Departure priority is evaluated only before a new Wait movement leg.
 		// An already moving Wait agent is never frozen in the middle of the choke.
@@ -627,6 +648,15 @@ void ABHCrowdEnemyAIController::RefreshTargetAndMove()
 				MoveGoal,
 				BlockingAttackRequester))
 			{
+				// Deferred Wait owners return before normal progress tracking below.
+				// On the first retry, let an elevated owner jump directly to its
+				// own Wait slot instead of remaining permanently outside the gate.
+				if (bWaitIngressDeferred
+					&& TryStartHighGroundDropRecovery(ControlledEnemy))
+				{
+					DrawDebugStatus(ControlledEnemy);
+					return;
+				}
 				CurrentFormationMovementRole = EBHFormationMovementRole::WaitIngressDeferred;
 				WaitIngressBlockingAttackRequester = BlockingAttackRequester;
 				if (!bWaitIngressDeferred)
@@ -735,8 +765,16 @@ void ABHCrowdEnemyAIController::RefreshTargetAndMove()
 		&& bHasRequestedSlotMove
 		&& UpdateStuckTracking(DistanceToMoveGoal, ControlledEnemy->GetVelocity().Size2D());
 	const float CurrentTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
-	const bool bCanRequestHoldingYield = CurrentSlotType == EBHCombatSlotType::Attack
-		|| CurrentSlotType == EBHCombatSlotType::Wait;
+	if (bHasRequestedSlotMove
+		&& NoProgressElapsed >= FMath::Max(0.1f, HighGroundDropNoProgressDelay)
+		&& TryStartHighGroundDropRecovery(ControlledEnemy))
+	{
+		DrawDebugStatus(ControlledEnemy);
+		return;
+	}
+	const bool bCanRequestHoldingYield = CurrentMoveRouteStage != EBHCombatMoveRouteStage::ExitDecompression
+		&& (CurrentSlotType == EBHCombatSlotType::Attack
+			|| CurrentSlotType == EBHCombatSlotType::Wait);
 	bool bHoldingYieldStarted = false;
 	if (bHasRequestedSlotMove
 		&& bCanRequestHoldingYield
@@ -771,7 +809,8 @@ void ABHCrowdEnemyAIController::RefreshTargetAndMove()
 		|| bSlotMoved
 		|| GetMoveStatus() != EPathFollowingStatus::Moving)
 	{
-		const bool bUsesRingWaypoint = CurrentMoveRouteStage == EBHCombatMoveRouteStage::ApproachRing
+		const bool bUsesRingWaypoint = CurrentMoveRouteStage == EBHCombatMoveRouteStage::ExitDecompression
+			|| CurrentMoveRouteStage == EBHCombatMoveRouteStage::ApproachRing
 			|| CurrentMoveRouteStage == EBHCombatMoveRouteStage::AlignOnRing
 			|| CurrentMoveRouteStage == EBHCombatMoveRouteStage::BypassCorePositive
 			|| CurrentMoveRouteStage == EBHCombatMoveRouteStage::BypassCoreNegative;
@@ -799,20 +838,32 @@ ABHHeroCharacter* ABHCrowdEnemyAIController::SelectTargetHero() const
 	if (IsValid(CurrentTarget)
 		&& CurrentTarget->IsPlayerControlled()
 		&& CurrentTime - TargetAcquiredTime < MinimumTargetHoldTime
-		&& IsHeroReachable(CurrentTarget))
+		&& (IsHeroReachable(CurrentTarget)
+			|| IsHeroHighGroundDropCandidate(CurrentTarget)))
 	{
 		return CurrentTarget.Get();
 	}
 
 	ABHHeroCharacter* ClosestReachableHero = nullptr;
 	float ClosestReachableDistance = TNumericLimits<float>::Max();
+	ABHHeroCharacter* ClosestDropCandidate = nullptr;
+	float ClosestDropCandidateDistance = TNumericLimits<float>::Max();
 	bool bCurrentTargetReachable = false;
+	bool bCurrentTargetIsDropCandidate = false;
 	float CurrentTargetDistance = TNumericLimits<float>::Max();
 
 	for (TActorIterator<ABHHeroCharacter> It(GetWorld()); It; ++It)
 	{
 		ABHHeroCharacter* Hero = *It;
-		if (!IsValid(Hero) || !Hero->IsPlayerControlled() || !IsHeroReachable(Hero))
+		if (!IsValid(Hero) || !Hero->IsPlayerControlled())
+		{
+			continue;
+		}
+
+		const bool bReachable = IsHeroReachable(Hero);
+		const bool bDropCandidate = !bReachable
+			&& IsHeroHighGroundDropCandidate(Hero);
+		if (!bReachable && !bDropCandidate)
 		{
 			continue;
 		}
@@ -820,30 +871,55 @@ ABHHeroCharacter* ABHCrowdEnemyAIController::SelectTargetHero() const
 		const float Distance = FVector::Dist2D(ControlledPawn->GetActorLocation(), Hero->GetActorLocation());
 		if (Hero == CurrentTarget)
 		{
-			bCurrentTargetReachable = true;
+			bCurrentTargetReachable = bReachable;
+			bCurrentTargetIsDropCandidate = bDropCandidate;
 			CurrentTargetDistance = Distance;
 		}
-		if (Distance < ClosestReachableDistance)
+		if (bReachable && Distance < ClosestReachableDistance)
 		{
 			ClosestReachableDistance = Distance;
 			ClosestReachableHero = Hero;
 		}
+		else if (bDropCandidate && Distance < ClosestDropCandidateDistance)
+		{
+			ClosestDropCandidateDistance = Distance;
+			ClosestDropCandidate = Hero;
+		}
 	}
 
-	if (!bCurrentTargetReachable || !IsValid(CurrentTarget))
+	// Prefer a fully connected target once the current target hold expires.
+	if (ClosestReachableHero)
 	{
-		return ClosestReachableHero;
+		if (!bCurrentTargetReachable || !IsValid(CurrentTarget))
+		{
+			return ClosestReachableHero;
+		}
+
+		if (CurrentTime - TargetAcquiredTime < MinimumTargetHoldTime
+			|| ClosestReachableHero == CurrentTarget)
+		{
+			return CurrentTarget;
+		}
+
+		return ClosestReachableDistance + TargetSwitchDistanceAdvantage < CurrentTargetDistance
+			? ClosestReachableHero
+			: CurrentTarget.Get();
 	}
 
+	// Keep an unreachable lower hero only while a valid drop landing exists.
+	if (!bCurrentTargetIsDropCandidate || !IsValid(CurrentTarget))
+	{
+		return ClosestDropCandidate;
+	}
 	if (CurrentTime - TargetAcquiredTime < MinimumTargetHoldTime
-		|| ClosestReachableHero == CurrentTarget)
+		|| ClosestDropCandidate == CurrentTarget)
 	{
 		return CurrentTarget;
 	}
 
-	return ClosestReachableHero
-		&& ClosestReachableDistance + TargetSwitchDistanceAdvantage < CurrentTargetDistance
-		? ClosestReachableHero
+	return ClosestDropCandidate
+		&& ClosestDropCandidateDistance + TargetSwitchDistanceAdvantage < CurrentTargetDistance
+		? ClosestDropCandidate
 		: CurrentTarget.Get();
 }
 
@@ -877,6 +953,93 @@ bool ABHCrowdEnemyAIController::IsHeroReachable(const ABHHeroCharacter* Hero) co
 		ProjectedTargetLocation.Location,
 		const_cast<APawn*>(ControlledPawn));
 	return NavigationPath && NavigationPath->IsValid() && !NavigationPath->IsPartial();
+}
+
+bool ABHCrowdEnemyAIController::IsHeroHighGroundDropCandidate(
+	const ABHHeroCharacter* Hero) const
+{
+	FVector LandingActorLocation;
+	float DropHeight = 0.0f;
+	float HorizontalDistance = 0.0f;
+	return ResolveHighGroundDropLanding(
+		Cast<ABHEnemy>(GetPawn()),
+		Hero->GetActorLocation(),
+		LandingActorLocation,
+		DropHeight,
+		HorizontalDistance);
+}
+
+bool ABHCrowdEnemyAIController::ResolveHighGroundDropLanding(
+	const ABHEnemy* ControlledEnemy,
+	const FVector& DesiredLandingGoal,
+	FVector& OutLandingActorLocation,
+	float& OutDropHeight,
+	float& OutHorizontalDistance) const
+{
+	OutLandingActorLocation = FVector::ZeroVector;
+	OutDropHeight = 0.0f;
+	OutHorizontalDistance = 0.0f;
+
+	UWorld* World = GetWorld();
+	const UCharacterMovementComponent* Movement = ControlledEnemy
+		? ControlledEnemy->GetCharacterMovement()
+		: nullptr;
+	if (!bEnableHighGroundDropRecovery
+		|| !ControlledEnemy
+		|| !Movement
+		|| !Movement->IsMovingOnGround()
+		|| ControlledEnemy->GetCombatState() != EBHEnemyCombatState::Chasing
+		|| ControlledEnemy->IsAttackLocked()
+		|| ControlledEnemy->IsHighGroundDropActive()
+		|| !World)
+	{
+		return false;
+	}
+
+	const FVector StartLocation = ControlledEnemy->GetActorLocation();
+	const float MinimumDropHeight = FMath::Max(0.0f, HighGroundDropMinimumHeight);
+	if (StartLocation.Z - DesiredLandingGoal.Z < MinimumDropHeight)
+	{
+		return false;
+	}
+
+	const FVector TargetLocation = DesiredLandingGoal;
+	FVector ToGoal = TargetLocation - StartLocation;
+	ToGoal.Z = 0.0f;
+	const float DesiredDistance = ToGoal.Size2D();
+	const float MaximumDistance = FMath::Max(1.0f, HighGroundDropMaximumDistance);
+	if (DesiredDistance <= UE_SMALL_NUMBER || DesiredDistance > MaximumDistance)
+	{
+		return false;
+	}
+
+	// Use the concrete formation goal instead of shortening every jump toward
+	// the player center. Distinct Wait slots therefore produce distinct landings.
+	const FVector DesiredLandingSurface = TargetLocation;
+
+	const UNavigationSystemV1* NavigationSystem = FNavigationSystem::GetCurrent<UNavigationSystemV1>(World);
+	FNavLocation ProjectedLanding;
+	if (!NavigationSystem
+		|| !NavigationSystem->ProjectPointToNavigation(
+			DesiredLandingSurface,
+			ProjectedLanding,
+			TargetNavProjectionExtent))
+	{
+		return false;
+	}
+
+	const UCapsuleComponent* Capsule = ControlledEnemy->GetCapsuleComponent();
+	const float CapsuleHalfHeight = Capsule ? Capsule->GetScaledCapsuleHalfHeight() : 0.0f;
+	const float CapsuleRadius = Capsule ? Capsule->GetScaledCapsuleRadius() : 0.0f;
+	OutLandingActorLocation = ProjectedLanding.Location
+		+ FVector(0.0f, 0.0f, CapsuleHalfHeight);
+	OutDropHeight = StartLocation.Z - OutLandingActorLocation.Z;
+	OutHorizontalDistance = FVector::Dist2D(StartLocation, OutLandingActorLocation);
+	const float MinimumHorizontalDistance = FMath::Max(80.0f, CapsuleRadius * 2.0f);
+	return OutDropHeight >= MinimumDropHeight
+		&& OutDropHeight <= FMath::Max(MinimumDropHeight, HighGroundDropMaximumHeight)
+		&& OutHorizontalDistance >= MinimumHorizontalDistance
+		&& OutHorizontalDistance <= MaximumDistance + 1.0f;
 }
 
 bool ABHCrowdEnemyAIController::AcquireCombatSlot(ABHEnemy* ControlledEnemy)
@@ -964,7 +1127,14 @@ void ABHCrowdEnemyAIController::RequestPursuitMove(
 	const FVector PredictedTargetLocation = CurrentTarget->GetActorLocation()
 		+ CurrentTarget->GetVelocity() * FMath::Max(0.0f, PursuitPredictionTime);
 	FVector PursuitGoal = PredictedTargetLocation;
-	const bool bUseDistributedGoal = bEnableDistributedPursuitGoals && !bInEngagementFormation;
+	// Initial formation collection still uses pursuit movement. Keep those agents
+	// on stable lane/row goals while the shared manager finalizes slot ownership,
+	// otherwise every provisional member converges on the player actor.
+	const bool bInitialFormationPursuit = bInEngagementFormation
+		&& CurrentSlotComponent
+		&& CurrentSlotComponent->IsInitialFormationPending();
+	const bool bUseDistributedGoal = bEnableDistributedPursuitGoals
+		&& (!bInEngagementFormation || bInitialFormationPursuit);
 	if (bUseDistributedGoal)
 	{
 		const int32 ResolvedLaneCount = FMath::Max(1, PursuitLaneCount);
@@ -1058,6 +1228,10 @@ void ABHCrowdEnemyAIController::RequestPursuitMove(
 	if (RequestResult == EPathFollowingRequestResult::Failed)
 	{
 		bHasRequestedPursuitMove = false;
+		if (TryStartHighGroundDropRecovery(ControlledEnemy))
+		{
+			return;
+		}
 		UE_LOG(
 			LogProjectBH,
 			Verbose,
@@ -1292,6 +1466,79 @@ void ABHCrowdEnemyAIController::ResetPursuitTracking()
 	ResetPursuitStuckWatchdog();
 }
 
+bool ABHCrowdEnemyAIController::TryStartHighGroundDropRecovery(
+	ABHEnemy* ControlledEnemy)
+{
+	UWorld* World = GetWorld();
+	if (!bEnableHighGroundDropRecovery
+		|| !ControlledEnemy
+		|| !IsValid(CurrentTarget)
+		|| CurrentSlotType != EBHCombatSlotType::Wait
+		|| !IsValid(CurrentSlotComponent)
+		|| !CurrentSlotRequester.IsValid()
+		|| !World
+		|| World->GetTimeSeconds() < HighGroundDropCooldownUntil)
+	{
+		return false;
+	}
+
+	EBHCombatSlotType ReservedSlotType = CurrentSlotType;
+	int32 ReservedSlotIndex = CurrentSlotIndex;
+	FVector WaitSlotLocation;
+	if (!CurrentSlotComponent->GetReservedSlot(
+		CurrentSlotRequester.Get(),
+		ReservedSlotType,
+		ReservedSlotIndex,
+		WaitSlotLocation)
+		|| ReservedSlotType != EBHCombatSlotType::Wait
+		|| ReservedSlotIndex == INDEX_NONE)
+	{
+		return false;
+	}
+
+	FVector LandingActorLocation;
+	float DropHeight = 0.0f;
+	float HorizontalDistance = 0.0f;
+	if (!ResolveHighGroundDropLanding(
+		ControlledEnemy,
+		WaitSlotLocation,
+		LandingActorLocation,
+		DropHeight,
+		HorizontalDistance))
+	{
+		return false;
+	}
+
+	if (!ControlledEnemy->TryStartHighGroundDrop(
+		LandingActorLocation,
+		HighGroundDropLaunchZ,
+		HighGroundDropMaximumHorizontalSpeed))
+	{
+		return false;
+	}
+
+	// The character validates first and atomically stops path following as it
+	// commits the launch. Only discard controller tracking after that succeeds.
+	bHasRequestedPursuitMove = false;
+	bHasRequestedSlotMove = false;
+	bForceSlotPathRefresh = true;
+	ClearWaitIngressDeferral();
+	ResetPursuitStuckWatchdog();
+	ResetStuckTracking();
+
+	HighGroundDropCooldownUntil = World->GetTimeSeconds()
+		+ FMath::Max(0.0f, HighGroundDropCooldown);
+	UE_LOG(
+		LogProjectBH,
+		Display,
+		TEXT("%s started a high-ground drop recovery toward Wait slot %d: %.0f cm down, %.0f cm forward."),
+		*ControlledEnemy->GetName(),
+		ReservedSlotIndex,
+		DropHeight,
+		HorizontalDistance);
+	return true;
+}
+
 void ABHCrowdEnemyAIController::ReleaseCurrentCombatSlot(
 	EBHCombatSlotReleaseReason Reason,
 	bool bTemporarilyExcludeReleasedSlot)
@@ -1422,6 +1669,13 @@ bool ABHCrowdEnemyAIController::TryStartOverlapRecovery(ABHEnemy* ControlledEnem
 	if (!FindOverlapEscapeGoal(ControlledEnemy, EscapeGoal, PrimaryBlocker))
 	{
 		return false;
+	}
+
+	// A real overlap on an upper route is already sufficient congestion evidence.
+	// Prefer leaving the crowded level over repeatedly shuffling sideways there.
+	if (TryStartHighGroundDropRecovery(ControlledEnemy))
+	{
+		return true;
 	}
 
 	// Abort the old path before marking the escape request active. Its aborted
@@ -1944,6 +2198,10 @@ void ABHCrowdEnemyAIController::RequestMoveToReservedSlot(
 			TEXT("%s failed to find a NavMesh path to its reserved combat slot for %s."),
 			*GetName(),
 			IsValid(CurrentTarget) ? *CurrentTarget->GetName() : TEXT("invalid target"));
+		if (TryStartHighGroundDropRecovery(Cast<ABHEnemy>(GetPawn())))
+		{
+			return;
+		}
 		if (CurrentSlotType == EBHCombatSlotType::Attack)
 		{
 			RecoverStalledCombatSlot(Cast<ABHEnemy>(GetPawn()));
@@ -2047,6 +2305,9 @@ void ABHCrowdEnemyAIController::DrawDebugStatus(const ABHEnemy* ControlledEnemy)
 	FColor RouteColor = FColor::White;
 	switch (CurrentMoveRouteStage)
 	{
+	case EBHCombatMoveRouteStage::ExitDecompression:
+		RouteColor = FColor(80, 255, 160);
+		break;
 	case EBHCombatMoveRouteStage::ApproachRing:
 		RouteColor = FColor::Cyan;
 		break;

@@ -303,6 +303,34 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI|Recovery|Pursuit", meta = (ClampMin = "0.0", Units = "s"))
 	float PursuitWatchdogCooldown = 1.0f;
 
+	/** Lets a stalled Wait owner leave a crowded upper route by jumping to its lower Wait slot. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI|Recovery|High Ground Drop")
+	bool bEnableHighGroundDropRecovery = true;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI|Recovery|High Ground Drop", meta = (ClampMin = "0.0", Units = "cm"))
+	float HighGroundDropMinimumHeight = 80.0f;
+
+	/** Rejects drops that are too tall for the normal enemy presentation. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI|Recovery|High Ground Drop", meta = (ClampMin = "0.0", Units = "cm"))
+	float HighGroundDropMaximumHeight = 650.0f;
+
+	/** Maximum direct distance from the stalled enemy to its reserved Wait slot. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI|Recovery|High Ground Drop", meta = (ClampMin = "1.0", Units = "cm"))
+	float HighGroundDropMaximumDistance = 900.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI|Recovery|High Ground Drop", meta = (ClampMin = "0.0", Units = "cm/s"))
+	float HighGroundDropLaunchZ = 250.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI|Recovery|High Ground Drop", meta = (ClampMin = "1.0", Units = "cm/s"))
+	float HighGroundDropMaximumHorizontalSpeed = 700.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI|Recovery|High Ground Drop", meta = (ClampMin = "0.0", Units = "s"))
+	float HighGroundDropCooldown = 2.0f;
+
+	/** Tries the drop before asking stationary formation members to yield. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI|Recovery|High Ground Drop", meta = (ClampMin = "0.1", Units = "s"))
+	float HighGroundDropNoProgressDelay = 0.75f;
+
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI|Recovery", meta = (ClampMin = "0.0", Units = "cm"))
 	float StuckProgressDistance = 20.0f;
 
@@ -349,6 +377,13 @@ private:
 	void RefreshAfterCombatSlotAssignmentChanged();
 	ABHHeroCharacter* SelectTargetHero() const;
 	bool IsHeroReachable(const ABHHeroCharacter* Hero) const;
+	bool IsHeroHighGroundDropCandidate(const ABHHeroCharacter* Hero) const;
+	bool ResolveHighGroundDropLanding(
+		const ABHEnemy* ControlledEnemy,
+		const FVector& DesiredLandingGoal,
+		FVector& OutLandingActorLocation,
+		float& OutDropHeight,
+		float& OutHorizontalDistance) const;
 	bool AcquireCombatSlot(ABHEnemy* ControlledEnemy);
 	void RequestPursuitMove(ABHEnemy* ControlledEnemy, float AcceptanceRadius = 75.0f);
 	void ApplyMovementIntent(ABHEnemy* ControlledEnemy, float MoveSpeed, bool bFaceTarget);
@@ -359,6 +394,7 @@ private:
 	bool UpdatePursuitStuckWatchdog(const ABHEnemy* ControlledEnemy);
 	void ResetPursuitStuckWatchdog();
 	void ResetPursuitTracking();
+	bool TryStartHighGroundDropRecovery(ABHEnemy* ControlledEnemy);
 	void ReleaseCurrentCombatSlot(EBHCombatSlotReleaseReason Reason, bool bTemporarilyExcludeReleasedSlot = false);
 	void RecoverStalledCombatSlot(ABHEnemy* ControlledEnemy);
 	bool TryStartOverlapRecovery(ABHEnemy* ControlledEnemy);
@@ -438,6 +474,7 @@ private:
 	FVector PursuitWatchdogReferenceLocation = FVector::ZeroVector;
 	float PursuitWatchdogNoProgressElapsed = 0.0f;
 	float PursuitWatchdogCooldownUntil = 0.0f;
+	float HighGroundDropCooldownUntil = 0.0f;
 	bool bHasPursuitWatchdogSample = false;
 	int32 PursuitWatchdogRecoveryCount = 0;
 	float ResolvedTargetRefreshInterval = 0.5f;

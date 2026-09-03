@@ -57,10 +57,13 @@ void UCombatEngagementSlotComponent::TickComponent(float DeltaTime, ELevelTick T
 	}
 
 	PruneInvalidReservations();
+	UpdateOwnerMovementHistory();
 	UpdateCombatSpaceAnalysis(DeltaTime);
+	UpdateExitDecompression();
 	RefreshCorridorFormationCapacity(DeltaTime);
 	RefreshPocketFormationCapacity();
 	UpdateEngagementAnchor(DeltaTime);
+	RefreshOpenFrontFillPriority();
 	RefreshCorridorRowLayout(DeltaTime);
 	RefreshInitialFormationPhase();
 	UpdateAttackVacancyTimers(DeltaTime);
@@ -729,6 +732,14 @@ void UCombatEngagementSlotComponent::HandleCombatSpaceModeChanged(EBHCombatSpace
 		return;
 	}
 	const AActor* Owner = GetOwner();
+	if (CurrentSpaceMode == EBHCombatSpaceMode::Open)
+	{
+		BeginExitDecompression(PreviousMode);
+	}
+	else
+	{
+		bExitDecompressionActive = false;
+	}
 	if (CurrentSpaceMode != EBHCombatSpaceMode::Corridor)
 	{
 		bMouthMixedActive = false;
@@ -1855,7 +1866,7 @@ bool UCombatEngagementSlotComponent::ReconcilePocketAttackReservations()
 		}
 
 		int32 BestSlotIndex = INDEX_NONE;
-		float BestDistanceSquared = TNumericLimits<float>::Max();
+		float BestScore = TNumericLimits<float>::Max();
 		for (int32 SlotIndex = 0; SlotIndex < GetActiveAttackSlotCount(); ++SlotIndex)
 		{
 			if (AttackReservations[SlotIndex].IsValid())
@@ -1876,12 +1887,15 @@ bool UCombatEngagementSlotComponent::ReconcilePocketAttackReservations()
 				continue;
 			}
 
-			const float DistanceSquared = FVector::DistSquared2D(
-				Requester->GetActorLocation(),
-				SlotLocation);
-			if (DistanceSquared < BestDistanceSquared)
+			float PathScore = 0.0f;
+			if (!GetNavigationPathScore(Requester, SlotLocation, PathScore))
 			{
-				BestDistanceSquared = DistanceSquared;
+				continue;
+			}
+			const float CandidateScore = PathScore + CalculatePocketCornerSlotPenalty(SlotLocation);
+			if (CandidateScore < BestScore)
+			{
+				BestScore = CandidateScore;
 				BestSlotIndex = SlotIndex;
 			}
 		}
@@ -3198,6 +3212,270 @@ bool UCombatEngagementSlotComponent::GetPendingWaitLocation(
 	return ProjectToNavigation(EngagementAnchorLocation + RingDirection * RingRadius, OutWorldLocation);
 }
 
+bool UCombatEngagementSlotComponent::IsRouteBlockedBySettledReservation(
+	AActor* Requester,
+	const FVector& Destination) const
+{
+	if (!bEnableOccupiedFormationBypass || !Requester || !GetWorld())
+	{
+		return false;
+	}
+
+	UNavigationPath* NavigationPath = UNavigationSystemV1::FindPathToLocationSynchronously(
+		GetWorld(),
+		Requester->GetActorLocation(),
+		Destination,
+		Requester);
+	if (!NavigationPath || !NavigationPath->IsValid() || NavigationPath->IsPartial()
+		|| NavigationPath->PathPoints.Num() < 2)
+	{
+		return false;
+	}
+
+	const ABHEnemy* RequesterEnemy = Cast<ABHEnemy>(Requester);
+	const UCapsuleComponent* RequesterCapsule = RequesterEnemy
+		? RequesterEnemy->GetCapsuleComponent()
+		: nullptr;
+	const float RequesterRadius = RequesterCapsule
+		? RequesterCapsule->GetScaledCapsuleRadius()
+		: 42.0f;
+	const float RequesterHalfHeight = RequesterCapsule
+		? RequesterCapsule->GetScaledCapsuleHalfHeight()
+		: NavProjectionExtent.Z;
+
+	const auto IsBlockedByLayer = [this,
+		Requester,
+		RequesterRadius,
+		RequesterHalfHeight,
+		&NavigationPath](
+			const TArray<TWeakObjectPtr<AActor>>& Reservations,
+			EBHCombatSlotType ReservationType)
+	{
+		for (int32 SlotIndex = 0; SlotIndex < Reservations.Num(); ++SlotIndex)
+		{
+			AActor* OtherRequester = Reservations[SlotIndex].Get();
+			if (!OtherRequester || OtherRequester == Requester
+				|| OtherRequester->GetVelocity().Size2D()
+					> FMath::Max(0.0f, OccupiedRouteBlockerMaxSpeed))
+			{
+				continue;
+			}
+
+			FVector OtherSlotLocation;
+			if (!GetSlotWorldLocation(ReservationType, SlotIndex, OtherSlotLocation)
+				|| FVector::DistSquared2D(OtherRequester->GetActorLocation(), OtherSlotLocation)
+					> FMath::Square(FMath::Max(0.0f, OccupiedRouteBlockerSlotRadius)))
+			{
+				continue;
+			}
+
+			const ABHEnemy* OtherEnemy = Cast<ABHEnemy>(OtherRequester);
+			const UCapsuleComponent* OtherCapsule = OtherEnemy
+				? OtherEnemy->GetCapsuleComponent()
+				: nullptr;
+			const float OtherRadius = OtherCapsule
+				? OtherCapsule->GetScaledCapsuleRadius()
+				: 42.0f;
+			const float OtherHalfHeight = OtherCapsule
+				? OtherCapsule->GetScaledCapsuleHalfHeight()
+				: NavProjectionExtent.Z;
+			const float SameLayerTolerance = FMath::Max(RequesterHalfHeight, OtherHalfHeight);
+			const float BlockRadius = RequesterRadius
+				+ OtherRadius
+				+ FMath::Max(0.0f, OccupiedRoutePathPadding);
+			const float BlockRadiusSquared = FMath::Square(BlockRadius);
+			const FVector2D OtherLocation(OtherRequester->GetActorLocation());
+
+			for (int32 PointIndex = 1; PointIndex < NavigationPath->PathPoints.Num(); ++PointIndex)
+			{
+				const FVector SegmentStart3D = NavigationPath->PathPoints[PointIndex - 1];
+				const FVector SegmentEnd3D = NavigationPath->PathPoints[PointIndex];
+				if (FMath::Abs(
+					OtherRequester->GetActorLocation().Z
+						- 0.5f * (SegmentStart3D.Z + SegmentEnd3D.Z)) > SameLayerTolerance)
+				{
+					continue;
+				}
+
+				const FVector2D SegmentStart(SegmentStart3D);
+				const FVector2D SegmentEnd(SegmentEnd3D);
+				const FVector2D Segment = SegmentEnd - SegmentStart;
+				const float SegmentLengthSquared = Segment.SizeSquared();
+				const float ClosestAlpha = SegmentLengthSquared <= UE_KINDA_SMALL_NUMBER
+					? 0.0f
+					: FMath::Clamp(
+						FVector2D::DotProduct(OtherLocation - SegmentStart, Segment)
+							/ SegmentLengthSquared,
+						0.0f,
+						1.0f);
+				const FVector2D ClosestPoint = SegmentStart + Segment * ClosestAlpha;
+				if (FVector2D::DistSquared(OtherLocation, ClosestPoint) <= BlockRadiusSquared)
+				{
+					return true;
+				}
+			}
+		}
+		return false;
+	};
+
+	return IsBlockedByLayer(AttackReservations, EBHCombatSlotType::Attack)
+		|| IsBlockedByLayer(WaitReservations, EBHCombatSlotType::Wait)
+		|| IsBlockedByLayer(HoldingReservations, EBHCombatSlotType::Holding);
+}
+
+bool UCombatEngagementSlotComponent::ResolvePocketOccupiedBypassGoal(
+	AActor* Requester,
+	EBHCombatSlotType SlotType,
+	const FVector& FinalSlotLocation,
+	EBHCombatMoveRouteStage PreviousRouteStage,
+	FVector& OutMoveGoal,
+	EBHCombatMoveRouteStage& OutRouteStage) const
+{
+	const AActor* Owner = GetOwner();
+	if (!Requester || !Owner || !IsPocketFormationActive())
+	{
+		return false;
+	}
+
+	const FVector RouteCenter = SlotType == EBHCombatSlotType::Attack
+		? Owner->GetActorLocation()
+		: EngagementAnchorLocation;
+	FVector TargetDirection = FinalSlotLocation - RouteCenter;
+	TargetDirection.Z = 0.0f;
+	const float FinalRadius = TargetDirection.Size2D();
+	if (FinalRadius <= UE_KINDA_SMALL_NUMBER)
+	{
+		return false;
+	}
+	TargetDirection /= FinalRadius;
+
+	FVector RequesterDirection = Requester->GetActorLocation() - RouteCenter;
+	RequesterDirection.Z = 0.0f;
+	const float RequesterRadius = RequesterDirection.Size2D();
+	RequesterDirection = RequesterRadius <= UE_KINDA_SMALL_NUMBER
+		? TargetDirection
+		: RequesterDirection / RequesterRadius;
+
+	float BaseBypassRadius = FinalRadius;
+	if (SlotType == EBHCombatSlotType::Attack)
+	{
+		BaseBypassRadius = WaitRingRadius;
+	}
+	else if (SlotType == EBHCombatSlotType::Wait)
+	{
+		BaseBypassRadius = HoldingRingRadius;
+	}
+	const float BypassRadius = FMath::Max3(
+		BaseBypassRadius,
+		FinalRadius + FMath::Max(0.0f, OccupiedRouteBypassRadiusPadding),
+		GetEffectiveCombatCoreRadius() + OrbitRingAcceptanceRadius);
+
+	const auto ResolveReachableWaypoint = [this, Requester, RouteCenter, BypassRadius](
+		const FVector& Direction,
+		FVector& OutWaypoint)
+	{
+		FVector ProjectedWaypoint;
+		if (Direction.IsNearlyZero()
+			|| !ProjectToNavigation(RouteCenter + Direction.GetSafeNormal2D() * BypassRadius, ProjectedWaypoint))
+		{
+			return false;
+		}
+		float PathScore = 0.0f;
+		if (!GetNavigationPathScoreBetween(
+			Requester,
+			Requester->GetActorLocation(),
+			ProjectedWaypoint,
+			PathScore,
+			true))
+		{
+			return false;
+		}
+		OutWaypoint = ProjectedWaypoint;
+		return true;
+	};
+
+	if (FMath::Abs(RequesterRadius - BypassRadius) > OrbitRingAcceptanceRadius)
+	{
+		TArray<FVector, TInlineAllocator<7>> CandidateDirections;
+		CandidateDirections.Add(RequesterDirection);
+		CandidateDirections.Add(PocketFormationDirection.GetSafeNormal2D());
+		CandidateDirections.Add(TargetDirection);
+		CandidateDirections.Add(RequesterDirection.RotateAngleAxis(45.0f, FVector::UpVector));
+		CandidateDirections.Add(RequesterDirection.RotateAngleAxis(-45.0f, FVector::UpVector));
+		CandidateDirections.Add(RequesterDirection.RotateAngleAxis(90.0f, FVector::UpVector));
+		CandidateDirections.Add(RequesterDirection.RotateAngleAxis(-90.0f, FVector::UpVector));
+		for (const FVector& CandidateDirection : CandidateDirections)
+		{
+			if (ResolveReachableWaypoint(CandidateDirection, OutMoveGoal))
+			{
+				OutRouteStage = EBHCombatMoveRouteStage::ApproachRing;
+				return true;
+			}
+		}
+		return false;
+	}
+
+	const float RequesterAngle = FMath::RadiansToDegrees(FMath::Atan2(RequesterDirection.Y, RequesterDirection.X));
+	const float TargetAngle = FMath::RadiansToDegrees(FMath::Atan2(TargetDirection.Y, TargetDirection.X));
+	const float DeltaAngle = FMath::FindDeltaAngleDegrees(RequesterAngle, TargetAngle);
+	if (FMath::Abs(DeltaAngle) <= RingIngressAngleTolerance)
+	{
+		OutMoveGoal = FinalSlotLocation;
+		OutRouteStage = EBHCombatMoveRouteStage::Ingress;
+		return true;
+	}
+
+	const float MaximumStep = FMath::Clamp(OrbitWaypointAngleStep, 5.0f, 90.0f);
+	for (int32 AttemptIndex = 0; AttemptIndex < 4; ++AttemptIndex)
+	{
+		const float StepScale = 1.0f - 0.2f * static_cast<float>(AttemptIndex);
+		const float StepAngle = FMath::Clamp(DeltaAngle, -MaximumStep, MaximumStep) * StepScale;
+		const FVector StepDirection = RequesterDirection.RotateAngleAxis(StepAngle, FVector::UpVector);
+		if (ResolveReachableWaypoint(StepDirection, OutMoveGoal))
+		{
+			OutRouteStage = EBHCombatMoveRouteStage::AlignOnRing;
+			return true;
+		}
+	}
+	return false;
+}
+
+float UCombatEngagementSlotComponent::CalculatePocketCornerSlotPenalty(
+	const FVector& SlotLocation) const
+{
+	if (!bEnablePocketCornerSlotPriority || !IsPocketFormationActive() || !GetWorld())
+	{
+		return 0.0f;
+	}
+	const UNavigationSystemV1* NavigationSystem = FNavigationSystem::GetCurrent<UNavigationSystemV1>(GetWorld());
+	if (!NavigationSystem)
+	{
+		return 0.0f;
+	}
+
+	const int32 ProbeCount = FMath::Clamp(PocketCornerClearanceProbeCount, 4, 16);
+	const float ProbeDistance = FMath::Max(1.0f, PocketCornerClearanceProbeDistance);
+	float MissingClearance = 0.0f;
+	for (int32 ProbeIndex = 0; ProbeIndex < ProbeCount; ++ProbeIndex)
+	{
+		const float Angle = 360.0f * static_cast<float>(ProbeIndex) / static_cast<float>(ProbeCount);
+		const FVector Direction(
+			FMath::Cos(FMath::DegreesToRadians(Angle)),
+			FMath::Sin(FMath::DegreesToRadians(Angle)),
+			0.0f);
+		const FVector ProbeEnd = SlotLocation + Direction * ProbeDistance;
+		FVector HitLocation = ProbeEnd;
+		if (NavigationSystem->NavigationRaycast(GetWorld(), SlotLocation, ProbeEnd, HitLocation))
+		{
+			MissingClearance += ProbeDistance
+				- FMath::Min(ProbeDistance, FVector::Dist2D(SlotLocation, HitLocation));
+		}
+	}
+
+	return (MissingClearance / static_cast<float>(ProbeCount))
+		* FMath::Max(0.0f, PocketCornerClearancePenaltyScale);
+}
+
 bool UCombatEngagementSlotComponent::GetMoveGoalForReservedSlot(
 	AActor* Requester,
 	EBHCombatSlotType SlotType,
@@ -3230,6 +3508,15 @@ bool UCombatEngagementSlotComponent::GetMoveGoalForReservedSlot(
 			Requester,
 			OutMoveGoal,
 			OutRouteStage);
+	}
+	if (ResolveExitDecompressionGoal(
+		Requester,
+		SlotType,
+		PreviousRouteStage,
+		OutMoveGoal,
+		OutRouteStage))
+	{
+		return true;
 	}
 	if (IsCorridorFormationActive())
 	{
@@ -3266,8 +3553,28 @@ bool UCombatEngagementSlotComponent::GetMoveGoalForReservedSlot(
 	}
 	if (IsPocketFormationActive())
 	{
-		// Pocket slots already face their valid open arc. Full-ring orbiting would
-		// push actors back into the blocked side of the pocket.
+		// Pocket slots face the valid open arc, but a direct Nav path can still run
+		// through owners that have already settled along the inner arc. Continue an
+		// active outer bypass until radial ingress begins; otherwise start one only
+		// with concrete occupied-path evidence.
+		if (PreviousRouteStage == EBHCombatMoveRouteStage::Ingress)
+		{
+			return true;
+		}
+		const bool bContinuesOccupiedBypass = PreviousRouteStage == EBHCombatMoveRouteStage::ApproachRing
+			|| PreviousRouteStage == EBHCombatMoveRouteStage::AlignOnRing;
+		if ((bContinuesOccupiedBypass
+				|| IsRouteBlockedBySettledReservation(Requester, FinalSlotLocation))
+			&& ResolvePocketOccupiedBypassGoal(
+				Requester,
+				SlotType,
+				FinalSlotLocation,
+				PreviousRouteStage,
+				OutMoveGoal,
+				OutRouteStage))
+		{
+			return true;
+		}
 		return true;
 	}
 
@@ -4746,6 +5053,7 @@ bool UCombatEngagementSlotComponent::PromoteBestOuterRequesterToWait()
 	AActor* BestRequester = nullptr;
 	int32 BestWaitSlotIndex = INDEX_NONE;
 	int32 BestHoldingSlotIndex = INDEX_NONE;
+	int32 BestSlotPriorityRank = TNumericLimits<int32>::Max();
 	float BestPathScore = TNumericLimits<float>::Max();
 	uint64 BestSequence = TNumericLimits<uint64>::Max();
 	for (int32 WaitSlotIndex = 0; WaitSlotIndex < WaitReservations.Num(); ++WaitSlotIndex)
@@ -4790,15 +5098,21 @@ bool UCombatEngagementSlotComponent::PromoteBestOuterRequesterToWait()
 			}
 
 			const uint64 Sequence = GetQueueSequence(Requester);
-			const bool bBetterPath = PathScore + 1.0f < BestPathScore;
+			const int32 SlotPriorityRank = GetOpenFrontFillSlotPriorityRank(
+				EBHCombatSlotType::Wait,
+				WaitSlotIndex);
+			const bool bBetterPriority = SlotPriorityRank < BestSlotPriorityRank;
+			const bool bSamePriority = SlotPriorityRank == BestSlotPriorityRank;
+			const bool bBetterPath = bSamePriority && PathScore + 1.0f < BestPathScore;
 			const bool bSamePathOlder = FMath::IsNearlyEqual(
 				PathScore,
 				BestPathScore,
-				1.0f) && Sequence < BestSequence;
-			if (!BestRequester || bBetterPath || bSamePathOlder)
+				1.0f) && bSamePriority && Sequence < BestSequence;
+			if (!BestRequester || bBetterPriority || bBetterPath || bSamePathOlder)
 			{
 				BestRequester = Requester;
 				BestWaitSlotIndex = WaitSlotIndex;
+				BestSlotPriorityRank = SlotPriorityRank;
 				BestPathScore = PathScore;
 				BestSequence = Sequence;
 				BestHoldingSlotIndex = INDEX_NONE;
@@ -4836,6 +5150,7 @@ bool UCombatEngagementSlotComponent::AssignBestPendingRequesterToHolding()
 {
 	AActor* BestRequester = nullptr;
 	int32 BestHoldingSlotIndex = INDEX_NONE;
+	int32 BestSlotPriorityRank = TNumericLimits<int32>::Max();
 	float BestPathScore = TNumericLimits<float>::Max();
 	uint64 BestSequence = TNumericLimits<uint64>::Max();
 	for (int32 HoldingSlotIndex = 0;
@@ -4878,15 +5193,21 @@ bool UCombatEngagementSlotComponent::AssignBestPendingRequesterToHolding()
 			}
 
 			const uint64 Sequence = GetQueueSequence(Requester);
-			const bool bBetterPath = PathScore + 1.0f < BestPathScore;
+			const int32 SlotPriorityRank = GetOpenFrontFillSlotPriorityRank(
+				EBHCombatSlotType::Holding,
+				HoldingSlotIndex);
+			const bool bBetterPriority = SlotPriorityRank < BestSlotPriorityRank;
+			const bool bSamePriority = SlotPriorityRank == BestSlotPriorityRank;
+			const bool bBetterPath = bSamePriority && PathScore + 1.0f < BestPathScore;
 			const bool bSamePathOlder = FMath::IsNearlyEqual(
 				PathScore,
 				BestPathScore,
-				1.0f) && Sequence < BestSequence;
-			if (!BestRequester || bBetterPath || bSamePathOlder)
+				1.0f) && bSamePriority && Sequence < BestSequence;
+			if (!BestRequester || bBetterPriority || bBetterPath || bSamePathOlder)
 			{
 				BestRequester = Requester;
 				BestHoldingSlotIndex = HoldingSlotIndex;
+				BestSlotPriorityRank = SlotPriorityRank;
 				BestPathScore = PathScore;
 				BestSequence = Sequence;
 			}
@@ -5005,6 +5326,7 @@ bool UCombatEngagementSlotComponent::FindBestWaitAdmission(
 			{
 				continue;
 			}
+			PathScore += CalculatePocketCornerSlotPenalty(AttackSlotLocation);
 
 			const uint64 Sequence = GetQueueSequence(Requester);
 			const bool bBetterPath = PathScore + 1.0f < BestPathScore;
@@ -5152,6 +5474,7 @@ bool UCombatEngagementSlotComponent::FindBestInitialAttackAssignment(
 			{
 				continue;
 			}
+			PathScore += CalculatePocketCornerSlotPenalty(AttackSlotLocation);
 
 			const bool bUsesPreferredSide = IsCorridorFormationActive()
 				&& GetCorridorSideIndex(Requester) == GetCorridorAttackSlotSideIndex(AttackSlotIndex);
@@ -5381,6 +5704,668 @@ void UCombatEngagementSlotComponent::ReformReservations()
 		FormationRevision);
 }
 
+void UCombatEngagementSlotComponent::UpdateOwnerMovementHistory()
+{
+	const AActor* Owner = GetOwner();
+	UWorld* World = GetWorld();
+	if (!Owner || !World)
+	{
+		return;
+	}
+
+	const FVector HorizontalVelocity(Owner->GetVelocity().X, Owner->GetVelocity().Y, 0.0f);
+	const float HorizontalSpeedSquared = HorizontalVelocity.SizeSquared2D();
+	if (HorizontalSpeedSquared
+		>= FMath::Square(FMath::Max(0.0f, OpenFrontFillDirectionSpeedThreshold)))
+	{
+		OpenFrontFillDirection = HorizontalVelocity.GetSafeNormal2D();
+		bHasOpenFrontFillDirection = !OpenFrontFillDirection.IsNearlyZero();
+	}
+
+	if (HorizontalSpeedSquared
+		< FMath::Square(FMath::Max(0.0f, ExitDecompressionDirectionSpeedThreshold)))
+	{
+		return;
+	}
+
+	LastMeaningfulOwnerMoveDirection = HorizontalVelocity.GetSafeNormal2D();
+	LastMeaningfulOwnerMoveTime = World->GetTimeSeconds();
+}
+
+void UCombatEngagementSlotComponent::RefreshOpenFrontFillPriority()
+{
+	const AActor* Owner = GetOwner();
+	const bool bHasValidContext = bEnableOpenFrontFillPriority
+		&& Owner
+		&& CurrentSpaceMode != EBHCombatSpaceMode::Corridor
+		&& bHasOpenFrontFillDirection
+		&& !OpenFrontFillDirection.IsNearlyZero();
+	if (!bHasValidContext)
+	{
+		bOpenFrontFillWasActive = false;
+		return;
+	}
+
+	const float HorizontalSpeedSquared = Owner->GetVelocity().SizeSquared2D();
+	if (bOpenFrontFillWasActive)
+	{
+		const float EffectiveResumeSpeed = FMath::Max(
+			OpenFrontFillStoppedSpeedThreshold + 1.0f,
+			OpenFrontFillResumeSpeedThreshold);
+		if (HorizontalSpeedSquared
+			>= FMath::Square(FMath::Max(0.0f, EffectiveResumeSpeed)))
+		{
+			bOpenFrontFillWasActive = false;
+		}
+		return;
+	}
+	if (HorizontalSpeedSquared
+		> FMath::Square(FMath::Max(0.0f, OpenFrontFillStoppedSpeedThreshold)))
+	{
+		return;
+	}
+
+	bOpenFrontFillWasActive = true;
+	const bool bWaitChanged = RebalanceOpenFrontFillReservations(
+		WaitReservations,
+		EBHCombatSlotType::Wait);
+	const bool bHoldingChanged = RebalanceOpenFrontFillReservations(
+		HoldingReservations,
+		EBHCombatSlotType::Holding);
+
+	if (bWaitChanged || bHoldingChanged)
+	{
+		++FormationRevision;
+		UE_LOG(
+			LogProjectBH,
+			Display,
+			TEXT("%s rebalanced Open Wait/Holding reservations toward the player's last movement direction."),
+			GetOwner() ? *GetOwner()->GetName() : TEXT("InvalidSlotOwner"));
+	}
+}
+
+bool UCombatEngagementSlotComponent::IsOpenFrontFillPriorityActive() const
+{
+	if (!bEnableOpenFrontFillPriority
+		|| CurrentSpaceMode == EBHCombatSpaceMode::Corridor
+		|| !bHasOpenFrontFillDirection
+		|| OpenFrontFillDirection.IsNearlyZero()
+		|| !bOpenFrontFillWasActive)
+	{
+		return false;
+	}
+	return true;
+}
+
+int32 UCombatEngagementSlotComponent::GetOpenFrontFillSlotPriorityRank(
+	EBHCombatSlotType SlotType,
+	int32 SlotIndex) const
+{
+	if (!IsOpenFrontFillPriorityActive()
+		|| (SlotType != EBHCombatSlotType::Wait
+			&& SlotType != EBHCombatSlotType::Holding))
+	{
+		return 0;
+	}
+
+	const float Alignment = GetOpenFrontFillSlotAlignment(SlotType, SlotIndex);
+	const float FrontArcCosine = FMath::Cos(FMath::DegreesToRadians(
+		FMath::Clamp(OpenFrontFillArcHalfAngle, 0.0f, 90.0f)));
+	if (Alignment >= FrontArcCosine)
+	{
+		return 0;
+	}
+	if (Alignment > -FrontArcCosine)
+	{
+		return 1;
+	}
+	return 2;
+}
+
+float UCombatEngagementSlotComponent::GetOpenFrontFillSlotAlignment(
+	EBHCombatSlotType SlotType,
+	int32 SlotIndex) const
+{
+	if (IsPocketFormationActive())
+	{
+		FVector SlotLocation;
+		if (!GetSlotWorldLocation(SlotType, SlotIndex, SlotLocation)
+			|| OpenFrontFillDirection.IsNearlyZero())
+		{
+			return -1.0f;
+		}
+		const FVector SlotDirection = (SlotLocation - EngagementAnchorLocation).GetSafeNormal2D();
+		return SlotDirection.IsNearlyZero()
+			? -1.0f
+			: FVector::DotProduct(
+				SlotDirection,
+				OpenFrontFillDirection.GetSafeNormal2D());
+	}
+
+	int32 SlotCount = 0;
+	float AngleOffset = 0.0f;
+	switch (SlotType)
+	{
+	case EBHCombatSlotType::Wait:
+		SlotCount = WaitReservations.Num();
+		AngleOffset = WaitRingAngleOffset;
+		break;
+	case EBHCombatSlotType::Holding:
+		SlotCount = HoldingReservations.Num();
+		AngleOffset = HoldingRingAngleOffset;
+		break;
+	default:
+		return -1.0f;
+	}
+
+	if (!FMath::IsWithin(SlotIndex, 0, SlotCount)
+		|| SlotCount <= 0
+		|| OpenFrontFillDirection.IsNearlyZero())
+	{
+		return -1.0f;
+	}
+
+	// Use the ring's intrinsic world angle instead of SlotLocation - PlayerLocation.
+	// Wait/Holding use a delayed anchor, so the latter would misclassify every
+	// slot toward the trailing side at exactly the moment the player stops.
+	const float AngleDegrees = AngleOffset
+		+ 360.0f * static_cast<float>(SlotIndex) / static_cast<float>(SlotCount);
+	const float AngleRadians = FMath::DegreesToRadians(AngleDegrees);
+	const FVector SlotDirection(FMath::Cos(AngleRadians), FMath::Sin(AngleRadians), 0.0f);
+	return FVector::DotProduct(
+		SlotDirection,
+		OpenFrontFillDirection.GetSafeNormal2D());
+}
+
+bool UCombatEngagementSlotComponent::RebalanceOpenFrontFillReservations(
+	TArray<TWeakObjectPtr<AActor>>& Reservations,
+	EBHCombatSlotType SlotType)
+{
+	if (!IsOpenFrontFillPriorityActive()
+		|| (SlotType != EBHCombatSlotType::Wait
+			&& SlotType != EBHCombatSlotType::Holding))
+	{
+		return false;
+	}
+
+	int32 OccupiedCount = 0;
+	for (const TWeakObjectPtr<AActor>& Reservation : Reservations)
+	{
+		OccupiedCount += Reservation.IsValid() ? 1 : 0;
+	}
+	if (OccupiedCount <= 0 || OccupiedCount >= Reservations.Num())
+	{
+		return false;
+	}
+
+	TArray<int32, TInlineAllocator<16>> RankedSlotIndices;
+	RankedSlotIndices.Reserve(Reservations.Num());
+	for (int32 SlotIndex = 0; SlotIndex < Reservations.Num(); ++SlotIndex)
+	{
+		FVector SlotLocation;
+		if (GetSlotWorldLocation(SlotType, SlotIndex, SlotLocation))
+		{
+			RankedSlotIndices.Add(SlotIndex);
+		}
+	}
+	if (RankedSlotIndices.IsEmpty())
+	{
+		return false;
+	}
+	RankedSlotIndices.Sort([this, SlotType](int32 SlotA, int32 SlotB)
+	{
+		const int32 RankA = GetOpenFrontFillSlotPriorityRank(SlotType, SlotA);
+		const int32 RankB = GetOpenFrontFillSlotPriorityRank(SlotType, SlotB);
+		if (RankA != RankB)
+		{
+			return RankA < RankB;
+		}
+		const float AlignmentA = GetOpenFrontFillSlotAlignment(SlotType, SlotA);
+		const float AlignmentB = GetOpenFrontFillSlotAlignment(SlotType, SlotB);
+		return !FMath::IsNearlyEqual(AlignmentA, AlignmentB, KINDA_SMALL_NUMBER)
+			? AlignmentA > AlignmentB
+			: SlotA < SlotB;
+	});
+
+	TArray<uint8, TInlineAllocator<16>> DesiredSlots;
+	DesiredSlots.Init(0, Reservations.Num());
+	const int32 DesiredSlotCount = FMath::Min(OccupiedCount, RankedSlotIndices.Num());
+	for (int32 DesiredOrdinal = 0; DesiredOrdinal < DesiredSlotCount; ++DesiredOrdinal)
+	{
+		DesiredSlots[RankedSlotIndices[DesiredOrdinal]] = 1;
+	}
+
+	TArray<int32, TInlineAllocator<16>> TargetSlotIndices;
+	for (int32 TargetSlotIndex : RankedSlotIndices)
+	{
+		if (DesiredSlots[TargetSlotIndex] && !Reservations[TargetSlotIndex].IsValid())
+		{
+			TargetSlotIndices.Add(TargetSlotIndex);
+		}
+	}
+	if (TargetSlotIndices.IsEmpty())
+	{
+		return false;
+	}
+
+	TArray<int32, TInlineAllocator<16>> SourceSlotIndices;
+	for (int32 SourceSlotIndex = 0; SourceSlotIndex < Reservations.Num(); ++SourceSlotIndex)
+	{
+		AActor* Requester = Reservations[SourceSlotIndex].Get();
+		if (!Requester || DesiredSlots[SourceSlotIndex])
+		{
+			continue;
+		}
+
+		const ABHEnemy* Enemy = Cast<ABHEnemy>(Requester);
+		if (Enemy
+			&& (Enemy->GetCombatState() == EBHEnemyCombatState::Attacking
+				|| Enemy->GetCombatState() == EBHEnemyCombatState::Recovering))
+		{
+			continue;
+		}
+		SourceSlotIndices.Add(SourceSlotIndex);
+	}
+	if (SourceSlotIndices.IsEmpty())
+	{
+		return false;
+	}
+
+	TArray<TArray<float>> PathScores;
+	TArray<TArray<int32>> CandidateSourceOrdinals;
+	PathScores.SetNum(TargetSlotIndices.Num());
+	CandidateSourceOrdinals.SetNum(TargetSlotIndices.Num());
+	for (int32 TargetOrdinal = 0; TargetOrdinal < TargetSlotIndices.Num(); ++TargetOrdinal)
+	{
+		FVector TargetLocation;
+		if (!GetSlotWorldLocation(
+			SlotType,
+			TargetSlotIndices[TargetOrdinal],
+			TargetLocation))
+		{
+			continue;
+		}
+
+		PathScores[TargetOrdinal].Init(
+			TNumericLimits<float>::Max(),
+			SourceSlotIndices.Num());
+		for (int32 SourceOrdinal = 0; SourceOrdinal < SourceSlotIndices.Num(); ++SourceOrdinal)
+		{
+			AActor* Requester = Reservations[SourceSlotIndices[SourceOrdinal]].Get();
+			float PathScore = 0.0f;
+			if (Requester
+				&& GetNavigationPathScore(Requester, TargetLocation, PathScore))
+			{
+				PathScores[TargetOrdinal][SourceOrdinal] = PathScore;
+				CandidateSourceOrdinals[TargetOrdinal].Add(SourceOrdinal);
+			}
+		}
+		CandidateSourceOrdinals[TargetOrdinal].Sort(
+			[&PathScores, TargetOrdinal](int32 SourceA, int32 SourceB)
+			{
+				const float ScoreA = PathScores[TargetOrdinal][SourceA];
+				const float ScoreB = PathScores[TargetOrdinal][SourceB];
+				return !FMath::IsNearlyEqual(ScoreA, ScoreB, 1.0f)
+					? ScoreA < ScoreB
+					: SourceA < SourceB;
+			});
+	}
+
+	// Process constrained targets first, then use an augmenting-path match. This
+	// maximizes the number of reachable front targets instead of letting a flexible
+	// requester greedily consume the only source that can reach another target.
+	TArray<int32, TInlineAllocator<16>> TargetOrder;
+	for (int32 TargetOrdinal = 0; TargetOrdinal < TargetSlotIndices.Num(); ++TargetOrdinal)
+	{
+		TargetOrder.Add(TargetOrdinal);
+	}
+	TargetOrder.Sort([&CandidateSourceOrdinals](int32 TargetA, int32 TargetB)
+	{
+		const int32 CandidateCountA = CandidateSourceOrdinals[TargetA].Num();
+		const int32 CandidateCountB = CandidateSourceOrdinals[TargetB].Num();
+		return CandidateCountA != CandidateCountB
+			? CandidateCountA < CandidateCountB
+			: TargetA < TargetB;
+	});
+
+	TArray<int32, TInlineAllocator<16>> SourceMatchedTarget;
+	TArray<int32, TInlineAllocator<16>> TargetMatchedSource;
+	SourceMatchedTarget.Init(INDEX_NONE, SourceSlotIndices.Num());
+	TargetMatchedSource.Init(INDEX_NONE, TargetSlotIndices.Num());
+	TFunction<bool(int32, TArray<uint8, TInlineAllocator<16>>&)> TryMatchTarget;
+	TryMatchTarget = [&CandidateSourceOrdinals,
+		&SourceMatchedTarget,
+		&TargetMatchedSource,
+		&TryMatchTarget](int32 TargetOrdinal, TArray<uint8, TInlineAllocator<16>>& VisitedSources)
+	{
+		for (int32 SourceOrdinal : CandidateSourceOrdinals[TargetOrdinal])
+		{
+			if (VisitedSources[SourceOrdinal])
+			{
+				continue;
+			}
+			VisitedSources[SourceOrdinal] = 1;
+			const int32 PreviousTarget = SourceMatchedTarget[SourceOrdinal];
+			if (PreviousTarget == INDEX_NONE
+				|| TryMatchTarget(PreviousTarget, VisitedSources))
+			{
+				SourceMatchedTarget[SourceOrdinal] = TargetOrdinal;
+				TargetMatchedSource[TargetOrdinal] = SourceOrdinal;
+				return true;
+			}
+		}
+		return false;
+	};
+
+	for (int32 TargetOrdinal : TargetOrder)
+	{
+		TArray<uint8, TInlineAllocator<16>> VisitedSources;
+		VisitedSources.Init(0, SourceSlotIndices.Num());
+		TryMatchTarget(TargetOrdinal, VisitedSources);
+	}
+
+	TArray<TWeakObjectPtr<AActor>, TInlineAllocator<16>> MovedRequesters;
+	MovedRequesters.SetNum(TargetSlotIndices.Num());
+	for (int32 TargetOrdinal = 0; TargetOrdinal < TargetSlotIndices.Num(); ++TargetOrdinal)
+	{
+		const int32 SourceOrdinal = TargetMatchedSource[TargetOrdinal];
+		if (SourceSlotIndices.IsValidIndex(SourceOrdinal))
+		{
+			MovedRequesters[TargetOrdinal] = Reservations[SourceSlotIndices[SourceOrdinal]];
+			Reservations[SourceSlotIndices[SourceOrdinal]].Reset();
+		}
+	}
+
+	bool bChanged = false;
+	for (int32 TargetOrdinal = 0; TargetOrdinal < TargetSlotIndices.Num(); ++TargetOrdinal)
+	{
+		AActor* MovedRequester = MovedRequesters[TargetOrdinal].Get();
+		if (!MovedRequester)
+		{
+			continue;
+		}
+		Reservations[TargetSlotIndices[TargetOrdinal]] = MovedRequester;
+		NotifyRequesterSlotChanged(MovedRequester);
+		bChanged = true;
+	}
+	return bChanged;
+}
+
+void UCombatEngagementSlotComponent::BeginExitDecompression(EBHCombatSpaceMode PreviousMode)
+{
+	const AActor* Owner = GetOwner();
+	const UWorld* World = GetWorld();
+	if (!bEnableExitDecompression
+		|| !Owner
+		|| !World
+		|| PreviousMode == EBHCombatSpaceMode::Open)
+	{
+		return;
+	}
+
+	const float CurrentTime = World->GetTimeSeconds();
+	FVector ExitForward = FVector::ZeroVector;
+	if (CurrentTime - LastMeaningfulOwnerMoveTime
+		<= FMath::Max(0.0f, ExitDecompressionDirectionMemoryDuration))
+	{
+		ExitForward = LastMeaningfulOwnerMoveDirection.GetSafeNormal2D();
+	}
+	if (ExitForward.IsNearlyZero() && PreviousMode == EBHCombatSpaceMode::Corridor)
+	{
+		ExitForward = -CorridorFormationRearDirection.GetSafeNormal2D();
+	}
+	if (ExitForward.IsNearlyZero() && PreviousMode == EBHCombatSpaceMode::Pocket)
+	{
+		ExitForward = PocketFormationDirection.GetSafeNormal2D();
+	}
+	if (ExitForward.IsNearlyZero())
+	{
+		ExitForward = Owner->GetActorForwardVector().GetSafeNormal2D();
+	}
+	if (ExitForward.IsNearlyZero())
+	{
+		return;
+	}
+
+	ExitDecompressionForward = ExitForward.GetSafeNormal2D();
+	const FVector DesiredOrigin = Owner->GetActorLocation()
+		- ExitDecompressionForward * FMath::Max(0.0f, ExitDecompressionOriginBacktrackDistance);
+	if (!ProjectToNavigation(DesiredOrigin, ExitDecompressionOrigin))
+	{
+		ExitDecompressionOrigin = DesiredOrigin;
+	}
+	ExitDecompressionStartTime = CurrentTime;
+	bExitDecompressionActive = true;
+	++FormationRevision;
+	NotifyAllReservedRequestersSlotChanged();
+
+	UE_LOG(
+		LogProjectBH,
+		Verbose,
+		TEXT("%s started exit decompression from %s."),
+		*Owner->GetName(),
+		*StaticEnum<EBHCombatSpaceMode>()->GetNameStringByValue(static_cast<int64>(PreviousMode)));
+}
+
+void UCombatEngagementSlotComponent::UpdateExitDecompression()
+{
+	const UWorld* World = GetWorld();
+	if (!bExitDecompressionActive || !World)
+	{
+		return;
+	}
+
+	if (CurrentSpaceMode == EBHCombatSpaceMode::Open
+		&& World->GetTimeSeconds() - ExitDecompressionStartTime
+			< FMath::Max(0.1f, ExitDecompressionTimeout))
+	{
+		return;
+	}
+
+	bExitDecompressionActive = false;
+	++FormationRevision;
+	NotifyAllReservedRequestersSlotChanged();
+}
+
+bool UCombatEngagementSlotComponent::HasExitDecompressionClearance(
+	const FVector& RequesterLocation) const
+{
+	UWorld* World = GetWorld();
+	UNavigationSystemV1* NavigationSystem = World
+		? FNavigationSystem::GetCurrent<UNavigationSystemV1>(World)
+		: nullptr;
+	FVector ProjectedLocation;
+	const FVector Forward = ExitDecompressionForward.GetSafeNormal2D();
+	if (!NavigationSystem
+		|| Forward.IsNearlyZero()
+		|| !ProjectToNavigation(RequesterLocation, ProjectedLocation))
+	{
+		return false;
+	}
+
+	const FVector Right(-Forward.Y, Forward.X, 0.0f);
+	const float RequiredWidth = FMath::Max(0.0f, ExitDecompressionMinimumLateralClearance);
+	const float SideProbeDistance = FMath::Max(
+		1.0f,
+		FMath::Max(0.5f * RequiredWidth, ExitDecompressionClearanceProbeDistance));
+	auto MeasureSideClearance = [NavigationSystem, World, &ProjectedLocation](
+		const FVector& Direction,
+		float Distance)
+	{
+		const FVector DesiredEnd = ProjectedLocation + Direction * Distance;
+		FVector HitLocation = DesiredEnd;
+		const bool bBlocked = NavigationSystem->NavigationRaycast(
+			World,
+			ProjectedLocation,
+			DesiredEnd,
+			HitLocation);
+		return bBlocked
+			? FMath::Min(Distance, FVector::Dist2D(ProjectedLocation, HitLocation))
+			: Distance;
+	};
+
+	return MeasureSideClearance(Right, SideProbeDistance)
+		+ MeasureSideClearance(-Right, SideProbeDistance)
+		>= RequiredWidth - 1.0f;
+}
+
+bool UCombatEngagementSlotComponent::IsRequesterInExitDecompression(AActor* Requester) const
+{
+	const UWorld* World = GetWorld();
+	if (!bExitDecompressionActive
+		|| !Requester
+		|| !World
+		|| CurrentSpaceMode != EBHCombatSpaceMode::Open
+		|| World->GetTimeSeconds() - ExitDecompressionStartTime
+			>= FMath::Max(0.1f, ExitDecompressionTimeout))
+	{
+		return false;
+	}
+
+	int32 ExistingAttackSlot = INDEX_NONE;
+	if (FindReservation(AttackReservations, Requester, ExistingAttackSlot))
+	{
+		return false;
+	}
+
+	const FVector Forward = ExitDecompressionForward.GetSafeNormal2D();
+	if (Forward.IsNearlyZero())
+	{
+		return false;
+	}
+	const FVector Right(-Forward.Y, Forward.X, 0.0f);
+	const FVector RelativeLocation = Requester->GetActorLocation() - ExitDecompressionOrigin;
+	const float ForwardDistance = FVector::DotProduct(RelativeLocation, Forward);
+	const float LateralDistance = FMath::Abs(FVector::DotProduct(RelativeLocation, Right));
+	FVector RawFanGoal;
+	if (GetExitDecompressionDesiredGoal(Requester, RawFanGoal))
+	{
+		const float GoalArrivalRadius = FMath::Max(1.0f, ExitDecompressionGoalArrivalRadius);
+		const FVector CenterFanGoal = ExitDecompressionOrigin
+			+ Forward * FVector::DotProduct(RawFanGoal - ExitDecompressionOrigin, Forward);
+		if (FVector::DistSquared2D(Requester->GetActorLocation(), RawFanGoal)
+				<= FMath::Square(GoalArrivalRadius)
+			|| FVector::DistSquared2D(Requester->GetActorLocation(), CenterFanGoal)
+				<= FMath::Square(GoalArrivalRadius))
+		{
+			return false;
+		}
+	}
+	if (ForwardDistance < FMath::Max(0.0f, ExitDecompressionCompletionDistance)
+		&& LateralDistance <= FMath::Max(0.0f, ExitDecompressionCaptureHalfWidth))
+	{
+		// Most compressed followers are unambiguously still inside the phase. Do
+		// not repeat two Nav raycasts for every Attack-admission candidate pair.
+		return true;
+	}
+	const bool bHasOpenClearance = HasExitDecompressionClearance(Requester->GetActorLocation());
+	if (ForwardDistance >= FMath::Max(0.0f, ExitDecompressionCompletionDistance)
+		&& bHasOpenClearance)
+	{
+		return false;
+	}
+	if (LateralDistance > FMath::Max(0.0f, ExitDecompressionCaptureHalfWidth)
+		&& bHasOpenClearance)
+	{
+		// This requester has already spread into a valid side area. Pulling it back
+		// toward the frozen mouth axis would recreate the cross-traffic we avoid.
+		return false;
+	}
+	return true;
+}
+
+bool UCombatEngagementSlotComponent::ResolveExitDecompressionGoal(
+	AActor* Requester,
+	EBHCombatSlotType SlotType,
+	EBHCombatMoveRouteStage PreviousRouteStage,
+	FVector& OutMoveGoal,
+	EBHCombatMoveRouteStage& OutRouteStage) const
+{
+	if (SlotType == EBHCombatSlotType::Attack
+		|| !IsRequesterInExitDecompression(Requester))
+	{
+		return false;
+	}
+
+	const FVector Forward = ExitDecompressionForward.GetSafeNormal2D();
+	FVector DesiredGoal;
+	if (!GetExitDecompressionDesiredGoal(Requester, DesiredGoal))
+	{
+		return false;
+	}
+	const float ForwardDistance = FVector::DotProduct(
+		DesiredGoal - ExitDecompressionOrigin,
+		Forward);
+	TArray<FVector, TInlineAllocator<2>> CandidateGoals;
+	CandidateGoals.Add(DesiredGoal);
+	CandidateGoals.Add(ExitDecompressionOrigin + Forward * ForwardDistance);
+
+	for (const FVector& CandidateGoal : CandidateGoals)
+	{
+		FVector ProjectedGoal;
+		float PathScore = 0.0f;
+		if (ProjectToNavigation(CandidateGoal, ProjectedGoal)
+			&& GetNavigationPathScoreBetween(
+				Requester,
+				Requester->GetActorLocation(),
+				ProjectedGoal,
+				PathScore))
+		{
+			OutMoveGoal = ProjectedGoal;
+			OutRouteStage = EBHCombatMoveRouteStage::ExitDecompression;
+			return true;
+		}
+	}
+	return false;
+}
+
+bool UCombatEngagementSlotComponent::GetExitDecompressionDesiredGoal(
+	AActor* Requester,
+	FVector& OutDesiredGoal) const
+{
+	if (!Requester)
+	{
+		return false;
+	}
+
+	const FVector Forward = ExitDecompressionForward.GetSafeNormal2D();
+	if (Forward.IsNearlyZero())
+	{
+		return false;
+	}
+	const FVector Right(-Forward.Y, Forward.X, 0.0f);
+	const int32 LaneCount = FMath::Clamp(ExitDecompressionLaneCount, 1, 7);
+	const int32 RowCount = FMath::Clamp(ExitDecompressionRowCount, 1, 8);
+	const uint64 Sequence = GetQueueSequence(Requester);
+	const uint64 StableSequence = Sequence == TNumericLimits<uint64>::Max()
+		? static_cast<uint64>(Requester->GetUniqueID())
+		: (Sequence > 0 ? Sequence - 1 : 0);
+	const int32 LaneOrdinal = static_cast<int32>(StableSequence % static_cast<uint64>(LaneCount));
+	const int32 RowIndex = static_cast<int32>(
+		(StableSequence / static_cast<uint64>(LaneCount)) % static_cast<uint64>(RowCount));
+
+	float LaneCoordinate = static_cast<float>(LaneOrdinal)
+		- 0.5f * static_cast<float>(LaneCount - 1);
+	if ((LaneCount & 1) != 0)
+	{
+		// Odd lane counts fill center, left, right, then the outer pair. This lets
+		// the first compressed arrivals advance without all choosing one side.
+		LaneCoordinate = LaneOrdinal == 0
+			? 0.0f
+			: (LaneOrdinal % 2 == 1
+				? -static_cast<float>((LaneOrdinal + 1) / 2)
+				: static_cast<float>(LaneOrdinal / 2));
+	}
+
+	const float ForwardDistance = FMath::Max(1.0f, ExitDecompressionGoalDistance)
+		+ static_cast<float>(RowIndex) * FMath::Max(0.0f, ExitDecompressionRowSpacing);
+	const float LateralOffset = LaneCoordinate * FMath::Max(0.0f, ExitDecompressionLaneSpacing);
+	OutDesiredGoal = ExitDecompressionOrigin
+		+ Forward * ForwardDistance
+		+ Right * LateralOffset;
+	return true;
+}
+
 void UCombatEngagementSlotComponent::ReformRingReservations(
 	TArray<TWeakObjectPtr<AActor>>& Reservations,
 	EBHCombatSlotType SlotType)
@@ -5540,7 +6525,6 @@ bool UCombatEngagementSlotComponent::IsAttackSlotBlockedByCurrentOccupancy(
 	{
 		return false;
 	}
-
 	if (GetOccupiedAttackSlotCost() >= GetActiveAttackSlotCount())
 	{
 		return true;
@@ -5591,6 +6575,12 @@ bool UCombatEngagementSlotComponent::CanRequesterOccupyAttackSlot(
 		|| !AttackReservations.IsValidIndex(AttackSlotIndex)
 		|| AttackSlotIndex >= GetActiveAttackSlotCount())
 	{
+		return false;
+	}
+	if (IsRequesterInExitDecompression(Requester))
+	{
+		// Keep the Attack reservation open while this requester clears the mouth.
+		// It becomes eligible immediately after reaching broad lateral clearance.
 		return false;
 	}
 
@@ -5719,6 +6709,7 @@ bool UCombatEngagementSlotComponent::TryReserveSlot(
 	int32 BestSlotIndex = INDEX_NONE;
 	float BestDistanceSquared = TNumericLimits<float>::Max();
 	float BestPathScore = TNumericLimits<float>::Max();
+	int32 BestOpenFrontFillPriorityRank = TNumericLimits<int32>::Max();
 	bool bBestSlotNeedsStagedRoute = true;
 	bool bBestUsesPreferredSide = false;
 	bool bBestUsesPreferredChannel = false;
@@ -5806,17 +6797,64 @@ bool UCombatEngagementSlotComponent::TryReserveSlot(
 			BestSlotIndex = SlotIndex;
 			break;
 		}
+		if (IsPocketFormationActive())
+		{
+			float PathScore = 0.0f;
+			if (!GetNavigationPathScore(Requester, SlotLocation, PathScore))
+			{
+				continue;
+			}
+			const int32 OpenFrontFillPriorityRank = GetOpenFrontFillSlotPriorityRank(
+				SlotType,
+				SlotIndex);
+			const float CandidateScore = PathScore + CalculatePocketCornerSlotPenalty(SlotLocation);
+			if (BestSlotIndex == INDEX_NONE
+				|| OpenFrontFillPriorityRank < BestOpenFrontFillPriorityRank
+				|| (OpenFrontFillPriorityRank == BestOpenFrontFillPriorityRank
+					&& CandidateScore < BestPathScore))
+			{
+				BestPathScore = CandidateScore;
+				BestSlotIndex = SlotIndex;
+				BestOpenFrontFillPriorityRank = OpenFrontFillPriorityRank;
+			}
+			continue;
+		}
 
+		const int32 OpenFrontFillPriorityRank = GetOpenFrontFillSlotPriorityRank(
+			SlotType,
+			SlotIndex);
+		const bool bBetterOpenFrontFillPriority = OpenFrontFillPriorityRank
+			< BestOpenFrontFillPriorityRank;
+		const bool bSameOpenFrontFillPriority = OpenFrontFillPriorityRank
+			== BestOpenFrontFillPriorityRank;
+		float PathScore = 0.0f;
+		if (!GetNavigationPathScore(Requester, SlotLocation, PathScore))
+		{
+			continue;
+		}
 		const float DistanceSquared = FVector::DistSquared2D(Requester->GetActorLocation(), SlotLocation);
 		const bool bNeedsStagedRoute = DoesSegmentCrossCombatCore(Requester->GetActorLocation(), SlotLocation);
-		const bool bPreferDirectSlot = bBestSlotNeedsStagedRoute && !bNeedsStagedRoute;
+		const bool bPreferDirectSlot = bSameOpenFrontFillPriority
+			&& bBestSlotNeedsStagedRoute
+			&& !bNeedsStagedRoute;
+		const bool bBetterPath = bSameOpenFrontFillPriority
+			&& bBestSlotNeedsStagedRoute == bNeedsStagedRoute
+			&& PathScore + 1.0f < BestPathScore;
+		const bool bSamePathCloser = bSameOpenFrontFillPriority
+			&& bBestSlotNeedsStagedRoute == bNeedsStagedRoute
+			&& FMath::IsNearlyEqual(PathScore, BestPathScore, 1.0f)
+			&& DistanceSquared < BestDistanceSquared;
 		if (BestSlotIndex == INDEX_NONE
+			|| bBetterOpenFrontFillPriority
 			|| bPreferDirectSlot
-			|| (bBestSlotNeedsStagedRoute == bNeedsStagedRoute && DistanceSquared < BestDistanceSquared))
+			|| bBetterPath
+			|| bSamePathCloser)
 		{
 			BestDistanceSquared = DistanceSquared;
+			BestPathScore = PathScore;
 			BestSlotIndex = SlotIndex;
 			bBestSlotNeedsStagedRoute = bNeedsStagedRoute;
+			BestOpenFrontFillPriorityRank = OpenFrontFillPriorityRank;
 		}
 	}
 
@@ -6645,6 +7683,20 @@ void UCombatEngagementSlotComponent::DrawDebugSlots() const
 		0.12f,
 		0,
 		1.5f);
+	if (IsOpenFrontFillPriorityActive())
+	{
+		const FVector FrontFillOrigin = Owner->GetActorLocation() + FVector(0.0f, 0.0f, 35.0f);
+		DrawDebugDirectionalArrow(
+			World,
+			FrontFillOrigin,
+			FrontFillOrigin + OpenFrontFillDirection.GetSafeNormal2D() * 220.0f,
+			30.0f,
+			FColor(255, 80, 200),
+			false,
+			0.12f,
+			0,
+			4.0f);
+	}
 
 	DrawCombatSpaceAnalysisDebug();
 	if (IsCorridorFormationActive())
@@ -7012,6 +8064,34 @@ void UCombatEngagementSlotComponent::DrawCombatSpaceAnalysisDebug() const
 			0.12f,
 			0,
 			4.0f);
+	}
+	if (bExitDecompressionActive)
+	{
+		const FVector EgressDrawOrigin = ExitDecompressionOrigin + FVector(0.0f, 0.0f, 28.0f);
+		const FVector EgressRight(
+			-ExitDecompressionForward.Y,
+			ExitDecompressionForward.X,
+			0.0f);
+		DrawDebugLine(
+			World,
+			EgressDrawOrigin - EgressRight * ExitDecompressionCaptureHalfWidth,
+			EgressDrawOrigin + EgressRight * ExitDecompressionCaptureHalfWidth,
+			FColor(80, 255, 160),
+			false,
+			0.12f,
+			0,
+			4.0f);
+		DrawDebugDirectionalArrow(
+			World,
+			EgressDrawOrigin,
+			EgressDrawOrigin
+				+ ExitDecompressionForward * ExitDecompressionCompletionDistance,
+			30.0f,
+			FColor(80, 255, 160),
+			false,
+			0.12f,
+			0,
+			5.0f);
 	}
 
 	const auto ResolveModeText = [](EBHCombatSpaceMode Mode)

@@ -21,6 +21,7 @@ UENUM(BlueprintType)
 enum class EBHCombatMoveRouteStage : uint8
 {
 	Direct,
+	ExitDecompression,
 	ApproachRing,
 	AlignOnRing,
 	Ingress,
@@ -215,6 +216,26 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Approach Routing", meta = (ClampMin = "0.0", Units = "cm"))
 	float CombatCoreBypassProjectionTolerance = 35.0f;
 
+	/** Routes Pocket arrivals around settled slot occupants instead of through the occupied inner arc. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Approach Routing|Occupied Bypass")
+	bool bEnableOccupiedFormationBypass = true;
+
+	/** An owner must be this close to its reservation before it is treated as a fixed route blocker. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Approach Routing|Occupied Bypass", meta = (ClampMin = "0.0", Units = "cm"))
+	float OccupiedRouteBlockerSlotRadius = 70.0f;
+
+	/** Moving owners are handled by Detour Crowd; only slower owners trigger the explicit outer bypass. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Approach Routing|Occupied Bypass", meta = (ClampMin = "0.0", Units = "cm/s"))
+	float OccupiedRouteBlockerMaxSpeed = 30.0f;
+
+	/** Extra width added to both capsules while testing a Nav path against settled owners. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Approach Routing|Occupied Bypass", meta = (ClampMin = "0.0", Units = "cm"))
+	float OccupiedRoutePathPadding = 8.0f;
+
+	/** Keeps the bypass waypoint outside the occupied slot row. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Approach Routing|Occupied Bypass", meta = (ClampMin = "0.0", Units = "cm"))
+	float OccupiedRouteBypassRadiusPadding = 140.0f;
+
 	/** Sends an enemy already trapped inside the Combat Core to a dedicated outer escape goal. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Core Escape")
 	bool bEnableCombatCoreEscape = true;
@@ -332,6 +353,26 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Space Analysis", meta = (ClampMin = "0.0", Units = "s", DisplayName = "Mouth Mixed Enter Duration"))
 	float MouthMixedEnterDuration = 0.3f;
 
+	/** After the player stops in Open or Pocket space, fill the last movement direction before the trailing side. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Escape Front Fill")
+	bool bEnableOpenFrontFillPriority = true;
+
+	/** Player speed required to remember a reliable escape direction for front filling. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Escape Front Fill", meta = (ClampMin = "0.0", Units = "cm/s"))
+	float OpenFrontFillDirectionSpeedThreshold = 80.0f;
+
+	/** Front filling becomes active once the player's horizontal speed drops to this value. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Escape Front Fill", meta = (ClampMin = "0.0", Units = "cm/s"))
+	float OpenFrontFillStoppedSpeedThreshold = 40.0f;
+
+	/** Once active, front filling remains latched until the player clearly resumes movement. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Escape Front Fill", meta = (ClampMin = "0.0", Units = "cm/s"))
+	float OpenFrontFillResumeSpeedThreshold = 80.0f;
+
+	/** Half-angle of the high-priority arc centered on the player's last movement direction. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Escape Front Fill", meta = (ClampMin = "0.0", ClampMax = "90.0", Units = "deg"))
+	float OpenFrontFillArcHalfAngle = 75.0f;
+
 	/** Keeps each directional mouth alive across a brief missed probe sample. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Space Analysis", meta = (ClampMin = "0.0", Units = "s"))
 	float CorridorMouthEvidenceHoldDuration = 0.5f;
@@ -339,6 +380,65 @@ protected:
 	/** Continuous contradictory raw evidence required before changing the active MouthMixed side kind. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Space Analysis", meta = (ClampMin = "0.0", Units = "s"))
 	float MouthMixedKindChangeDuration = 0.6f;
+
+	/** Keeps corridor/corner followers moving through the exit before assigning their final Open-space route. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Exit Decompression")
+	bool bEnableExitDecompression = true;
+
+	/** Recent player movement must be at least this fast to define a reliable exit direction. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Exit Decompression", meta = (ClampMin = "0.0", Units = "cm/s"))
+	float ExitDecompressionDirectionSpeedThreshold = 80.0f;
+
+	/** How long the last meaningful player movement direction may seed a mode-transition exit. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Exit Decompression", meta = (ClampMin = "0.0", Units = "s"))
+	float ExitDecompressionDirectionMemoryDuration = 1.5f;
+
+	/** Approximates the mouth behind the player when Corridor/Pocket finally commits to Open. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Exit Decompression", meta = (ClampMin = "0.0", Units = "cm"))
+	float ExitDecompressionOriginBacktrackDistance = 200.0f;
+
+	/** Distance past the frozen exit plane that an Enemy must clear before normal slot routing resumes. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Exit Decompression", meta = (ClampMin = "0.0", Units = "cm"))
+	float ExitDecompressionCompletionDistance = 220.0f;
+
+	/** Base forward distance of the frozen fan waypoint measured from the exit plane. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Exit Decompression", meta = (ClampMin = "1.0", Units = "cm"))
+	float ExitDecompressionGoalDistance = 320.0f;
+
+	/** Stable number of lanes used while the compressed stream opens into a fan. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Exit Decompression", meta = (ClampMin = "1", ClampMax = "7", UIMin = "1", UIMax = "5"))
+	int32 ExitDecompressionLaneCount = 3;
+
+	/** Final lateral center spacing of the exit fan lanes. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Exit Decompression", meta = (ClampMin = "0.0", Units = "cm"))
+	float ExitDecompressionLaneSpacing = 110.0f;
+
+	/** Number of staggered forward rows used to avoid one shared fan waypoint. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Exit Decompression", meta = (ClampMin = "1", ClampMax = "8", UIMin = "1", UIMax = "6"))
+	int32 ExitDecompressionRowCount = 4;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Exit Decompression", meta = (ClampMin = "0.0", Units = "cm"))
+	float ExitDecompressionRowSpacing = 100.0f;
+
+	/** Prevents agents already well outside the choke axis from being pulled back into its exit fan. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Exit Decompression", meta = (ClampMin = "0.0", Units = "cm"))
+	float ExitDecompressionCaptureHalfWidth = 300.0f;
+
+	/** Required traversable width across the exit axis before an Enemy may resume final slot routing. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Exit Decompression", meta = (ClampMin = "0.0", Units = "cm"))
+	float ExitDecompressionMinimumLateralClearance = 250.0f;
+
+	/** Maximum distance inspected independently on each side of the frozen exit axis. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Exit Decompression", meta = (ClampMin = "1.0", Units = "cm"))
+	float ExitDecompressionClearanceProbeDistance = 250.0f;
+
+	/** Raw fan-goal proximity that also completes transit, even when local clearance remains asymmetric. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Exit Decompression", meta = (ClampMin = "1.0", Units = "cm"))
+	float ExitDecompressionGoalArrivalRadius = 60.0f;
+
+	/** Safety timeout for malformed or unusually long exits. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Exit Decompression", meta = (ClampMin = "0.1", Units = "s"))
+	float ExitDecompressionTimeout = 3.0f;
 
 	/** Keeps the last committed formation across brief failures to project the player onto NavMesh. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Space Analysis", meta = (ClampMin = "0.0", Units = "s"))
@@ -485,6 +585,20 @@ protected:
 	/** Repath reserved enemies after the smoothed Pocket direction turns this far. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Pocket Formation", meta = (ClampMin = "1.0", ClampMax = "90.0", Units = "deg"))
 	float PocketFormationRepathAngle = 15.0f;
+
+	/** Fills locally open Pocket slots before slots pressed against a wall or corner. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Pocket Formation|Corner Priority")
+	bool bEnablePocketCornerSlotPriority = true;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Pocket Formation|Corner Priority", meta = (ClampMin = "4", ClampMax = "16"))
+	int32 PocketCornerClearanceProbeCount = 8;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Pocket Formation|Corner Priority", meta = (ClampMin = "1.0", Units = "cm"))
+	float PocketCornerClearanceProbeDistance = 180.0f;
+
+	/** Path-cost multiplier for missing radial clearance around a Pocket slot. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Pocket Formation|Corner Priority", meta = (ClampMin = "0.0"))
+	float PocketCornerClearancePenaltyScale = 2.0f;
 
 	/** Keeps aggressive owner reassignment active briefly after a Pocket relocation or turn. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Pocket Formation", meta = (ClampMin = "0.0", Units = "s"))
@@ -653,6 +767,25 @@ private:
 		FVector& OutSide0,
 		FVector& OutSide1) const;
 	void HandleCombatSpaceModeChanged(EBHCombatSpaceMode PreviousMode);
+	void UpdateOwnerMovementHistory();
+	void RefreshOpenFrontFillPriority();
+	bool IsOpenFrontFillPriorityActive() const;
+	int32 GetOpenFrontFillSlotPriorityRank(EBHCombatSlotType SlotType, int32 SlotIndex) const;
+	float GetOpenFrontFillSlotAlignment(EBHCombatSlotType SlotType, int32 SlotIndex) const;
+	bool RebalanceOpenFrontFillReservations(
+		TArray<TWeakObjectPtr<AActor>>& Reservations,
+		EBHCombatSlotType SlotType);
+	void BeginExitDecompression(EBHCombatSpaceMode PreviousMode);
+	void UpdateExitDecompression();
+	bool IsRequesterInExitDecompression(AActor* Requester) const;
+	bool HasExitDecompressionClearance(const FVector& RequesterLocation) const;
+	bool ResolveExitDecompressionGoal(
+		AActor* Requester,
+		EBHCombatSlotType SlotType,
+		EBHCombatMoveRouteStage PreviousRouteStage,
+		FVector& OutMoveGoal,
+		EBHCombatMoveRouteStage& OutRouteStage) const;
+	bool GetExitDecompressionDesiredGoal(AActor* Requester, FVector& OutDesiredGoal) const;
 	void UpdateMouthMixedState(float SampleDeltaTime);
 	void SetMouthMixedState(bool bNewActive, EMouthMixedKind NewKind = EMouthMixedKind::None);
 	void UpdateCorridorFormationDirection();
@@ -833,6 +966,17 @@ private:
 		EBHCombatMoveRouteStage PreviousRouteStage,
 		FVector& OutMoveGoal,
 		EBHCombatMoveRouteStage& OutRouteStage) const;
+	bool IsRouteBlockedBySettledReservation(
+		AActor* Requester,
+		const FVector& Destination) const;
+	bool ResolvePocketOccupiedBypassGoal(
+		AActor* Requester,
+		EBHCombatSlotType SlotType,
+		const FVector& FinalSlotLocation,
+		EBHCombatMoveRouteStage PreviousRouteStage,
+		FVector& OutMoveGoal,
+		EBHCombatMoveRouteStage& OutRouteStage) const;
+	float CalculatePocketCornerSlotPenalty(const FVector& SlotLocation) const;
 	bool ProjectToNavigation(const FVector& DesiredLocation, FVector& OutProjectedLocation) const;
 	bool GetNavigationPathScore(AActor* Requester, const FVector& Destination, float& OutPathScore) const;
 	bool GetNavigationPathScoreBetween(
@@ -860,6 +1004,15 @@ private:
 	float CoreIntrusionStableElapsed = 0.0f;
 	float CoreIntrusionBlockedUntil = 0.0f;
 	float PocketRapidReformUntil = 0.0f;
+	bool bExitDecompressionActive = false;
+	float ExitDecompressionStartTime = 0.0f;
+	FVector ExitDecompressionOrigin = FVector::ZeroVector;
+	FVector ExitDecompressionForward = FVector::ForwardVector;
+	FVector LastMeaningfulOwnerMoveDirection = FVector::ForwardVector;
+	float LastMeaningfulOwnerMoveTime = -BIG_NUMBER;
+	FVector OpenFrontFillDirection = FVector::ForwardVector;
+	bool bHasOpenFrontFillDirection = false;
+	bool bOpenFrontFillWasActive = false;
 
 	struct FEngagementQueueEntry
 	{

@@ -88,6 +88,22 @@ void ABHEnemy::Tick(float DeltaSeconds)
 	AddMovementInput(-GetActorRightVector(), 1.0f, true);
 }
 
+void ABHEnemy::Landed(const FHitResult& Hit)
+{
+	Super::Landed(Hit);
+	if (!HasAuthority() || !bHighGroundDropActive)
+	{
+		return;
+	}
+
+	bHighGroundDropActive = false;
+	ForceNetUpdate();
+	if (ABHCrowdEnemyAIController* CrowdController = Cast<ABHCrowdEnemyAIController>(GetController()))
+	{
+		CrowdController->NotifyCombatSlotAssignmentChanged();
+	}
+}
+
 void ABHEnemy::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
 {
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
@@ -97,6 +113,7 @@ void ABHEnemy::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetime
 	DOREPLIFETIME(ABHEnemy, bHasJoinedFormation);
 	DOREPLIFETIME(ABHEnemy, bNeedsFormationCatchUp);
 	DOREPLIFETIME(ABHEnemy, bWantsRunLocomotion);
+	DOREPLIFETIME(ABHEnemy, bHighGroundDropActive);
 	DOREPLIFETIME(ABHEnemy, bIsPoolInWorld);
 	DOREPLIFETIME(ABHEnemy, PoolManager);
 	DOREPLIFETIME(ABHEnemy, SelectedWeaponIndex);
@@ -134,6 +151,73 @@ void ABHEnemy::SetWantsRunLocomotion(bool bWantsRun)
 	{
 		bWantsRunLocomotion = bWantsRun;
 	}
+}
+
+bool ABHEnemy::TryStartHighGroundDrop(
+	const FVector& LandingLocation,
+	float LaunchZ,
+	float MaxHorizontalSpeed)
+{
+	UCharacterMovementComponent* Movement = GetCharacterMovement();
+	if (!HasAuthority()
+		|| CombatState != EBHEnemyCombatState::Chasing
+		|| IsAttackLocked()
+		|| bHighGroundDropActive
+		|| !Movement
+		|| !Movement->IsMovingOnGround())
+	{
+		return false;
+	}
+
+	const FVector Delta = LandingLocation - GetActorLocation();
+	const FVector HorizontalDelta(Delta.X, Delta.Y, 0.0f);
+	const float HorizontalDistance = HorizontalDelta.Size2D();
+	const float GravityMagnitude = FMath::Abs(Movement->GetGravityZ());
+	if (HorizontalDistance <= UE_SMALL_NUMBER
+		|| Delta.Z >= 0.0f
+		|| GravityMagnitude <= UE_SMALL_NUMBER)
+	{
+		return false;
+	}
+
+	const float SafeLaunchZ = FMath::Max(0.0f, LaunchZ);
+	const float FallDistance = -Delta.Z;
+	const float NaturalFlightTime = (SafeLaunchZ
+		+ FMath::Sqrt(FMath::Square(SafeLaunchZ) + 2.0f * GravityMagnitude * FallDistance))
+		/ GravityMagnitude;
+	const float FlightTime = FMath::Max(
+		FMath::Max(0.1f, NaturalFlightTime),
+		HorizontalDistance / FMath::Max(1.0f, MaxHorizontalSpeed));
+	const FVector HorizontalVelocity = HorizontalDelta / FlightTime;
+	const float VerticalVelocity = (Delta.Z
+		+ 0.5f * GravityMagnitude * FMath::Square(FlightTime))
+		/ FlightTime;
+
+	bHighGroundDropActive = true;
+	bNeedsFormationCatchUp = false;
+	bWantsRunLocomotion = false;
+	// Mark the drop active before aborting path following. Any synchronous move
+	// completion callback can then recognize that this is an intentional launch.
+	if (ABHCrowdEnemyAIController* CrowdController = Cast<ABHCrowdEnemyAIController>(GetController()))
+	{
+		CrowdController->StopMovement();
+	}
+	const FVector FacingDirection = HorizontalDelta.GetSafeNormal2D();
+	if (!FacingDirection.IsNearlyZero())
+	{
+		const FRotator FacingRotation(0.0f, FacingDirection.Rotation().Yaw, 0.0f);
+		SetActorRotation(FacingRotation);
+		if (Controller)
+		{
+			Controller->SetControlRotation(FacingRotation);
+		}
+	}
+	ForceNetUpdate();
+	LaunchCharacter(
+		FVector(HorizontalVelocity.X, HorizontalVelocity.Y, VerticalVelocity),
+		true,
+		true);
+	return true;
 }
 
 bool ABHEnemy::IsPoolManaged() const
@@ -400,6 +484,7 @@ void ABHEnemy::StartStagger(float Duration)
 	GetWorldTimerManager().ClearTimer(AttackMontageFailSafeTimerHandle);
 	GetWorldTimerManager().ClearTimer(StaggerTimerHandle);
 	ClearAttackContext();
+	bHighGroundDropActive = false;
 	SetCombatState(EBHEnemyCombatState::Staggered);
 
 	if (ABHCrowdEnemyAIController* CrowdController = Cast<ABHCrowdEnemyAIController>(GetController()))
@@ -561,6 +646,7 @@ void ABHEnemy::Die()
 	GetWorldTimerManager().ClearTimer(AttackMontageFailSafeTimerHandle);
 	GetWorldTimerManager().ClearTimer(StaggerTimerHandle);
 	ClearAttackContext();
+	bHighGroundDropActive = false;
 	SetCombatState(EBHEnemyCombatState::Dead);
 
 	if (ABHCrowdEnemyAIController* CrowdController = Cast<ABHCrowdEnemyAIController>(GetController()))
@@ -712,6 +798,7 @@ void ABHEnemy::ResetGameplayStateForPoolActivation()
 {
 	ClearAttackContext();
 	ResetFormationJoinState();
+	bHighGroundDropActive = false;
 	bLoggedInvalidAttackConfig = false;
 	bHasAppliedDamageThisAttack = false;
 	SuccessfulAttackStartCount = 0;

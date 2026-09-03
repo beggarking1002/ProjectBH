@@ -45,6 +45,10 @@ protected:
 	UPROPERTY(VisibleDefaultsOnly, BlueprintReadOnly, Category = "AnimData|Combat")
 	bool bUseMovingUpperBodyAttack = false;
 
+	/** Drives the dedicated drop-jump state used by high-ground congestion recovery. */
+	UPROPERTY(VisibleDefaultsOnly, BlueprintReadOnly, Category = "AnimData|Movement")
+	bool bIsHighGroundDropping = false;
+
 	/** True after the enemy physically reached a formation slot for its current engagement. */
 	UPROPERTY(VisibleDefaultsOnly, BlueprintReadOnly, Category = "AnimData|LocomotionData")
 	bool bHasJoinedFormation = false;

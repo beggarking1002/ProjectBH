@@ -28,6 +28,7 @@ void UBHEnemyAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 	bUseMovingUpperBodyAttack = OwningEnemy->UsesMovingUpperBodyAttack()
 		&& (CombatState == EBHEnemyCombatState::Attacking
 			|| CombatState == EBHEnemyCombatState::Recovering);
+	bIsHighGroundDropping = OwningEnemy->IsHighGroundDropActive();
 	bHasJoinedFormation = OwningEnemy->HasJoinedFormation();
 	bNeedsFormationCatchUp = OwningEnemy->NeedsFormationCatchUp();
 	bWantsRunLocomotion = OwningEnemy->WantsRunLocomotion();

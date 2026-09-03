@@ -48,6 +48,7 @@ public:
 
 	virtual void BeginPlay() override;
 	virtual void Tick(float DeltaSeconds) override;
+	virtual void Landed(const FHitResult& Hit) override;
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
 	/** Starts one server-authoritative melee attack against a fixed target. */
@@ -99,6 +100,15 @@ public:
 
 	/** Sets whether the current AI move should use Run presentation. Authority only. */
 	void SetWantsRunLocomotion(bool bWantsRun);
+
+	/** Launches this enemy toward a validated lower landing point without releasing its combat slot. */
+	bool TryStartHighGroundDrop(
+		const FVector& LandingLocation,
+		float LaunchZ,
+		float MaxHorizontalSpeed);
+
+	UFUNCTION(BlueprintPure, Category = "AI|Recovery")
+	bool IsHighGroundDropActive() const { return bHighGroundDropActive; }
 
 	UFUNCTION(BlueprintPure, Category = "Combat|Enemy")
 	float GetAttackStartRange() const;
@@ -231,6 +241,10 @@ private:
 	/** Replicated gait request; actual displacement still gates animation playback. */
 	UPROPERTY(Replicated, VisibleInstanceOnly, BlueprintReadOnly, Category = "AI|Formation", meta = (AllowPrivateAccess = "true"))
 	bool bWantsRunLocomotion = false;
+
+	/** True only during the deliberate high-ground bottleneck drop. */
+	UPROPERTY(Replicated, VisibleInstanceOnly, BlueprintReadOnly, Category = "AI|Recovery", meta = (AllowPrivateAccess = "true"))
+	bool bHighGroundDropActive = false;
 
 	/** True for living enemies and visible corpses; false only while hidden in free storage. */
 	UPROPERTY(ReplicatedUsing = OnRep_PoolInWorld, VisibleInstanceOnly, BlueprintReadOnly, Category = "Enemy Pool", meta = (AllowPrivateAccess = "true"))
