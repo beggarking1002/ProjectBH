@@ -355,6 +355,14 @@ void ABHCrowdEnemyAIController::RefreshTargetAndMove()
 	// concrete pursuit/Attack ingress paths below opt back into Run.
 	ControlledEnemy->SetWantsRunLocomotion(false);
 	CurrentFormationMovementRole = EBHFormationMovementRole::None;
+	if (ControlledEnemy->IsChargeAttackActive())
+	{
+		// Root Motion owns displacement and facing for the entire Charge Montage.
+		// Do not let path following or focus rotation compete with it.
+		ClearFocus(EAIFocusPriority::Gameplay);
+		DrawDebugStatus(ControlledEnemy);
+		return;
+	}
 
 	if (bHoldingYieldActive)
 	{
@@ -463,6 +471,19 @@ void ABHCrowdEnemyAIController::RefreshTargetAndMove()
 		return;
 	}
 
+	const float DistanceToTarget = FVector::Dist2D(
+		ControlledEnemy->GetActorLocation(),
+		CurrentTarget->GetActorLocation());
+	LastDistanceToSlot = DistanceToTarget;
+	if (CurrentSlotType == EBHCombatSlotType::Attack
+		&& ControlledEnemy->TryStartChargeAttack(CurrentTarget))
+	{
+		ResetPursuitTracking();
+		ResetStuckTracking();
+		DrawDebugStatus(ControlledEnemy);
+		return;
+	}
+
 	if (GetWorld()->GetTimeSeconds() < SlotRequestBlockedUntil)
 	{
 		StopMovement();
@@ -470,10 +491,6 @@ void ABHCrowdEnemyAIController::RefreshTargetAndMove()
 		return;
 	}
 
-	const float DistanceToTarget = FVector::Dist2D(
-		ControlledEnemy->GetActorLocation(),
-		CurrentTarget->GetActorLocation());
-	LastDistanceToSlot = DistanceToTarget;
 	float EffectiveEngagementExitRadius = FMath::Max(EngagementEnterRadius, EngagementExitRadius);
 	if (CurrentSlotComponent && CurrentSlotRequester.IsValid())
 	{

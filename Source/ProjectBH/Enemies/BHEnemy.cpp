@@ -10,6 +10,7 @@
 #include "../BHGameplayTags.h"
 #include "../BHCollisionChannels.h"
 #include "../Combat/BHAttackDefinition.h"
+#include "../Components/Combat/BHEnemyChargeComponent.h"
 #include "../DataAssets/Enemy/DataAsset_EnemyConfig.h"
 #include "../ProjectBH.h"
 #include "AbilitySystemInterface.h"
@@ -39,6 +40,7 @@ ABHEnemy::ABHEnemy()
 	EquippedWeaponMesh->SetupAttachment(GetMesh(), TEXT("WeaponSocket_R"));
 	EquippedWeaponMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	EquippedWeaponMesh->SetGenerateOverlapEvents(false);
+	ChargeComponent = CreateDefaultSubobject<UBHEnemyChargeComponent>(TEXT("ChargeComponent"));
 
 }
 
@@ -282,6 +284,10 @@ void ABHEnemy::DeactivateToPoolStorage(const FTransform& StorageTransform)
 		return;
 	}
 
+	if (ChargeComponent)
+	{
+		ChargeComponent->ResetChargeState();
+	}
 	GetWorldTimerManager().ClearAllTimersForObject(this);
 	ClearAttackContext();
 	SetLifeSpan(0.0f);
@@ -322,18 +328,38 @@ bool ABHEnemy::TryStartBasicAttack(
 	AActor* TargetActor,
 	EBHEnemyAttackPresentationMode PresentationMode)
 {
-	if (!HasAuthority() || IsAttackLocked() || !IsValid(TargetActor))
+	const FBHEnemyAttackConfig* AttackConfig = GetDefaultAttackConfig();
+	return AttackConfig
+		&& TryStartConfiguredAttack(AttackConfig->AttackId, TargetActor, PresentationMode);
+}
+
+bool ABHEnemy::TryStartChargeAttack(AActor* TargetActor)
+{
+	return ChargeComponent && ChargeComponent->TryStartCharge(TargetActor);
+}
+
+bool ABHEnemy::IsChargeAttackActive() const
+{
+	return ChargeComponent && ChargeComponent->IsChargeActive();
+}
+
+bool ABHEnemy::TryStartConfiguredAttack(
+	FName AttackId,
+	AActor* TargetActor,
+	EBHEnemyAttackPresentationMode PresentationMode)
+{
+	if (!HasAuthority() || IsAttackLocked() || !IsValid(TargetActor) || AttackId.IsNone())
 	{
 		return false;
 	}
 
-	const FBHEnemyAttackConfig* AttackConfig = GetDefaultAttackConfig();
+	const FBHEnemyAttackConfig* AttackConfig = GetAttackConfig(AttackId);
 	const FBHAttackDefinitionRow* AttackDefinition = AttackConfig ? GetAttackDefinition(*AttackConfig) : nullptr;
 	if (!AttackConfig || !AttackDefinition || !AttackConfig->Montage)
 	{
 		if (!bLoggedInvalidAttackConfig)
 		{
-			UE_LOG(LogProjectBH, Warning, TEXT("%s cannot attack. Assign EnemyConfigDataAsset, its default attack, a valid AttackDefinition row, and Montage."), *GetName());
+			UE_LOG(LogProjectBH, Warning, TEXT("%s cannot use attack '%s'. Assign its AttackDefinition row and Montage."), *GetName(), *AttackId.ToString());
 			bLoggedInvalidAttackConfig = true;
 		}
 		return false;
@@ -385,14 +411,14 @@ bool ABHEnemy::TryStartBasicAttack(
 		}
 	}
 
-	MulticastPlayBasicAttack(
+	MulticastPlayAttack(
 		ActiveAttackMontage,
 		ActiveAttackMontageSection,
 		ActiveAttackPresentationMode);
 	return true;
 }
 
-void ABHEnemy::MulticastPlayBasicAttack_Implementation(
+void ABHEnemy::MulticastPlayAttack_Implementation(
 	UAnimMontage* AttackMontage,
 	FName MontageSection,
 	EBHEnemyAttackPresentationMode PresentationMode)
@@ -480,6 +506,10 @@ void ABHEnemy::StartStagger(float Duration)
 		return;
 	}
 
+	if (ChargeComponent)
+	{
+		ChargeComponent->CancelCharge();
+	}
 	GetWorldTimerManager().ClearTimer(AttackRecoveryTimerHandle);
 	GetWorldTimerManager().ClearTimer(AttackMontageFailSafeTimerHandle);
 	GetWorldTimerManager().ClearTimer(StaggerTimerHandle);
@@ -573,6 +603,10 @@ void ABHEnemy::HandleAttackMontageEnded(UAnimMontage* Montage, bool bInterrupted
 	}
 
 	GetWorldTimerManager().ClearTimer(AttackMontageFailSafeTimerHandle);
+	if (ChargeComponent)
+	{
+		ChargeComponent->NotifyOwningAttackEnded(Montage);
+	}
 	BeginAttackRecovery();
 }
 
@@ -584,6 +618,10 @@ void ABHEnemy::HandleAttackMontageFailSafe()
 	}
 
 	UE_LOG(LogProjectBH, Warning, TEXT("%s attack montage did not finish in time; forcing recovery."), *GetName());
+	if (ChargeComponent)
+	{
+		ChargeComponent->CancelCharge();
+	}
 	MulticastPlayReaction(nullptr);
 	BeginAttackRecovery();
 }
@@ -642,6 +680,10 @@ void ABHEnemy::Die()
 		return;
 	}
 
+	if (ChargeComponent)
+	{
+		ChargeComponent->CancelCharge();
+	}
 	GetWorldTimerManager().ClearTimer(AttackRecoveryTimerHandle);
 	GetWorldTimerManager().ClearTimer(AttackMontageFailSafeTimerHandle);
 	GetWorldTimerManager().ClearTimer(StaggerTimerHandle);
@@ -712,6 +754,10 @@ void ABHEnemy::ConfigureLiveCollision()
 	Capsule->SetCollisionResponseToChannel(ECC_Pawn, ECR_Block);
 	Capsule->SetCollisionResponseToChannel(ECC_WorldStatic, ECR_Block);
 	Capsule->SetCollisionResponseToChannel(ECC_WorldDynamic, ECR_Block);
+	// Enemy traffic is handled by Detour Crowd and the local overlap recovery.
+	// Do not let a live enemy carve Recast and make another enemy's static lane
+	// query (including Troll Charge) interpret crowd traffic as level geometry.
+	Capsule->SetCanEverAffectNavigation(false);
 }
 
 void ABHEnemy::ApplyEnemyConfigRuntimeSettings()
@@ -796,6 +842,10 @@ void ABHEnemy::DestroyCurrentAIController()
 
 void ABHEnemy::ResetGameplayStateForPoolActivation()
 {
+	if (ChargeComponent)
+	{
+		ChargeComponent->ResetChargeState();
+	}
 	ClearAttackContext();
 	ResetFormationJoinState();
 	bHighGroundDropActive = false;
@@ -934,7 +984,10 @@ bool ABHEnemy::IsAttackTargetInHitArea() const
 	}
 
 	const float MinimumFacingDot = FMath::Cos(FMath::DegreesToRadians(AttackDefinition->TargetConeHalfAngle));
-	return FVector::DotProduct(GetActorForwardVector(), TargetDirection2D) >= MinimumFacingDot;
+	const FVector AttackFacing = ChargeComponent && ChargeComponent->IsChargeActive()
+		? ChargeComponent->GetChargeDirection()
+		: GetActorForwardVector();
+	return FVector::DotProduct(AttackFacing, TargetDirection2D) >= MinimumFacingDot;
 }
 
 float ABHEnemy::GetAttackStartRange() const

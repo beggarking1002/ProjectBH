@@ -9,6 +9,7 @@
 
 class UAnimMontage;
 class UStaticMeshComponent;
+class UBHEnemyChargeComponent;
 class ABHEnemyPoolManager;
 struct FOnAttributeChangeData;
 struct FBHAttackDefinitionRow;
@@ -55,6 +56,12 @@ public:
 	bool TryStartBasicAttack(
 		AActor* TargetActor,
 		EBHEnemyAttackPresentationMode PresentationMode = EBHEnemyAttackPresentationMode::StationaryFullBody);
+
+	/** Attempts the configured Large-enemy fixed-distance Root Motion charge. */
+	bool TryStartChargeAttack(AActor* TargetActor);
+
+	UFUNCTION(BlueprintPure, Category = "Combat|Enemy|Charge")
+	bool IsChargeAttackActive() const;
 
 	/** Called by BH Enemy Attack Hit notify. Damage validation and application run on the server only. */
 	void PerformBasicAttackHit();
@@ -149,6 +156,9 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Equipment")
 	UStaticMeshComponent* GetEquippedWeaponMeshComponent() const { return EquippedWeaponMesh; }
 
+	UFUNCTION(BlueprintPure, Category = "Combat|Enemy|Charge")
+	UBHEnemyChargeComponent* GetChargeComponent() const { return ChargeComponent; }
+
 	/** Configures a deferred-spawned enemy as hidden pool reserve before BeginPlay. */
 	void InitializeForPool(ABHEnemyPoolManager* InPoolManager);
 
@@ -183,7 +193,7 @@ private:
 	void OnRep_SelectedWeaponIndex();
 
 	UFUNCTION(NetMulticast, Reliable)
-	void MulticastPlayBasicAttack(
+	void MulticastPlayAttack(
 		UAnimMontage* AttackMontage,
 		FName MontageSection,
 		EBHEnemyAttackPresentationMode PresentationMode);
@@ -213,6 +223,10 @@ private:
 	void SelectAndEquipRandomWeapon();
 	void ApplySelectedWeapon();
 	void ClearAttackContext();
+	bool TryStartConfiguredAttack(
+		FName AttackId,
+		AActor* TargetActor,
+		EBHEnemyAttackPresentationMode PresentationMode);
 	bool IsAttackTargetInHitArea() const;
 	const FBHEnemyAttackConfig* GetAttackConfig(FName AttackId) const;
 	const FBHEnemyAttackConfig* GetDefaultAttackConfig() const;
@@ -257,6 +271,9 @@ private:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Equipment", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<UStaticMeshComponent> EquippedWeaponMesh;
 
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat|Charge", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<UBHEnemyChargeComponent> ChargeComponent;
+
 	/** Index into EnemyConfigDataAsset.WeaponOptions, selected only by the authority. */
 	UPROPERTY(ReplicatedUsing = OnRep_SelectedWeaponIndex, VisibleInstanceOnly, BlueprintReadOnly, Category = "Equipment", meta = (AllowPrivateAccess = "true"))
 	int32 SelectedWeaponIndex = INDEX_NONE;
@@ -278,4 +295,6 @@ private:
 	bool bLoggedInvalidAttackConfig = false;
 	bool bHasAppliedDamageThisAttack = false;
 	int32 SuccessfulAttackStartCount = 0;
+
+	friend class UBHEnemyChargeComponent;
 };

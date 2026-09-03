@@ -61,6 +61,74 @@ struct PROJECTBH_API FBHEnemyWeaponOption
 	FTransform RelativeTransform = FTransform::Identity;
 };
 
+/** Fixed-distance Root Motion charge used by a Large enemy. */
+USTRUCT(BlueprintType)
+struct PROJECTBH_API FBHEnemyChargeConfig
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly)
+	bool bEnabled = false;
+
+	/** Entry in Attacks whose full-body Montage contains the authored Root Motion. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly)
+	FName AttackId = TEXT("ChargeAttack");
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, meta = (ClampMin = "0.0", Units = "cm"))
+	float MinimumStartDistance = 400.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, meta = (ClampMin = "0.0", Units = "cm"))
+	float MaximumStartDistance = 850.0f;
+
+	/** Lets the attack start when its authored travel ends this far short of the target center. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, meta = (ClampMin = "0.0", Units = "cm"))
+	float TargetReachTolerance = 120.0f;
+
+	/** Rejects a Montage whose authored Root Motion drifts farther sideways than this. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, meta = (ClampMin = "0.0", Units = "cm"))
+	float MaximumRootMotionLateralDrift = 25.0f;
+
+	/** Rejects a Montage whose authored Root Motion turns farther than this. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, meta = (ClampMin = "0.0", ClampMax = "180.0", Units = "deg"))
+	float MaximumRootMotionYaw = 5.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, meta = (ClampMin = "0.0", Units = "cm"))
+	float MaximumTargetHeightDifference = 120.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, meta = (ClampMin = "0.0", Units = "s"))
+	float Cooldown = 6.0f;
+
+	/** Extra horizontal clearance required around the Large enemy's capsule. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, meta = (ClampMin = "0.0", Units = "cm"))
+	float PathClearancePadding = 15.0f;
+
+	/** Maximum allowed difference between the authored endpoint and its NavMesh projection. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, meta = (ClampMin = "0.0", Units = "cm"))
+	float DestinationProjectionTolerance = 100.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly)
+	FVector NavProjectionExtent = FVector(150.0f, 150.0f, 250.0f);
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, meta = (ClampMin = "0.0", Units = "cm"))
+	float KnockAsideRadiusPadding = 30.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, meta = (ClampMin = "0.0", Units = "cm/s"))
+	float KnockAsideHorizontalSpeed = 900.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, meta = (ClampMin = "0.0", Units = "cm/s"))
+	float KnockAsideForwardSpeed = 150.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, meta = (ClampMin = "0.0", Units = "cm/s"))
+	float KnockAsideVerticalSpeed = 250.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, meta = (ClampMin = "0.0", Units = "s"))
+	float KnockAsideStaggerDuration = 0.8f;
+
+	/** Large enemies resist another Large enemy's charge by default. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly)
+	bool bKnockAsideLargeEnemies = false;
+};
+
 /** Per-enemy movement settings and mappings from attack IDs to animation/effect assets. */
 UCLASS(BlueprintType)
 class PROJECTBH_API UDataAsset_EnemyConfig : public UDataAsset
@@ -106,6 +174,9 @@ public:
 	/** Extra time allowed after the expected montage duration before forcing recovery. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat", meta = (ClampMin = "0.0", Units = "s"))
 	float AttackMontageFailSafeGrace = 0.5f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Charge")
+	FBHEnemyChargeConfig Charge;
 
 	/** Default stagger time after a successful damaging hit. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Reaction", meta = (ClampMin = "0.0", Units = "s"))
