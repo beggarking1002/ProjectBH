@@ -13,6 +13,7 @@
 #include "Camera/CameraComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/Combat/CombatEngagementSlotComponent.h"
+#include "Components/Camera/BHCameraOcclusionComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/SpringArmComponent.h"
@@ -47,6 +48,7 @@ ABHHeroCharacter::ABHHeroCharacter()
 	FollowCamera = CreateDefaultSubobject<UCameraComponent>(TEXT("FollowCamera"));
 	FollowCamera->SetupAttachment(CameraBoom, USpringArmComponent::SocketName);
 	FollowCamera->bUsePawnControlRotation = false;
+	CameraOcclusion = CreateDefaultSubobject<UBHCameraOcclusionComponent>(TEXT("CameraOcclusion"));
 
 	ComboAttackSectionNames = { TEXT("Attack_A"), TEXT("Attack_B"), TEXT("Attack_C") };
 	BasicAttackDamageEffect = UBHGE_BasicAttackDamage::StaticClass();

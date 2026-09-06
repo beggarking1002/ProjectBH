@@ -66,6 +66,7 @@ UCLASS(Blueprintable)
 class PROJECTBH_API ABHCrowdEnemyAIController : public ADetourCrowdAIController
 {
 	GENERATED_BODY()
+	friend class UBHCombatDiagnosticsSubsystem;
 
 public:
 	virtual void OnPossess(APawn* InPawn) override;

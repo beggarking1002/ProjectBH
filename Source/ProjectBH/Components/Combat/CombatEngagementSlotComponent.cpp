@@ -1,6 +1,7 @@
 // Copyright ProjectBH. All Rights Reserved.
 
 #include "CombatEngagementSlotComponent.h"
+#include "../../Diagnostics/BHCombatDiagnosticsSubsystem.h"
 
 #include "../../AI/BHCrowdEnemyAIController.h"
 #include "../../AI/Navigation/BHNavigationQuery.h"
@@ -194,6 +195,7 @@ void UCombatEngagementSlotComponent::AnalyzeCombatSpace(float SampleDeltaTime)
 			SpaceAnalysisInvalidGraceRemaining = FMath::Max(
 				0.0f,
 				SpaceAnalysisInvalidGraceRemaining - FMath::Max(0.0f, SampleDeltaTime));
+			BH_DIAGNOSTICS(this, if (CandidateSpaceMode != CurrentSpaceMode) Diagnostics->Count(TEXT("FormationCandidateChangeCount"), this, FormationRevision));
 			CandidateSpaceMode = CurrentSpaceMode;
 			SpaceModeTransitionElapsed = 0.0f;
 			bRawCorridorMouthDetected = false;
@@ -205,6 +207,7 @@ void UCombatEngagementSlotComponent::AnalyzeCombatSpace(float SampleDeltaTime)
 		}
 		bHasValidSpaceAnalysis = false;
 		SpaceAnalysisInvalidGraceRemaining = 0.0f;
+		BH_DIAGNOSTICS(this, if (CandidateSpaceMode != CurrentSpaceMode) Diagnostics->Count(TEXT("FormationCandidateChangeCount"), this, FormationRevision));
 		CandidateSpaceMode = CurrentSpaceMode;
 		SpaceModeTransitionElapsed = 0.0f;
 		SpaceProbeEndpoints.Reset();
@@ -495,6 +498,7 @@ void UCombatEngagementSlotComponent::AnalyzeCombatSpace(float SampleDeltaTime)
 
 	const FBHCombatSpaceClassificationResult Classification =
 		FBHCombatSpaceClassificationPolicy::Evaluate(ClassificationInput);
+	BH_DIAGNOSTICS(this, if (CandidateSpaceMode != Classification.CandidateMode) Diagnostics->Count(TEXT("FormationCandidateChangeCount"), this, FormationRevision));
 	CandidateSpaceMode = Classification.CandidateMode;
 	bCorridorEdgePocketActive = Classification.bCorridorEdgePocketActive;
 
@@ -511,6 +515,7 @@ void UCombatEngagementSlotComponent::AnalyzeCombatSpace(float SampleDeltaTime)
 	{
 		const EBHCombatSpaceMode PreviousMode = CurrentSpaceMode;
 		CurrentSpaceMode = CandidateSpaceMode;
+		BH_DIAGNOSTICS(this, Diagnostics->Count(TEXT("FormationCommittedChangeCount"), this, FormationRevision));
 		SpaceModeTransitionElapsed = 0.0f;
 		HandleCombatSpaceModeChanged(PreviousMode);
 	}
@@ -672,6 +677,7 @@ void UCombatEngagementSlotComponent::SetMouthMixedState(
 	PendingCorridorHoldingRowLayout.Reset();
 	PendingCorridorRowLayoutElapsed = 0.0f;
 	++FormationRevision;
+	BH_DIAGNOSTICS(this, Diagnostics->Count(TEXT("FormationRevisionChangeCount"), this, FormationRevision));
 	NotifyAllReservedRequestersSlotChanged();
 }
 
@@ -817,6 +823,7 @@ void UCombatEngagementSlotComponent::HandleCombatSpaceModeChanged(EBHCombatSpace
 	}
 
 	++FormationRevision;
+	BH_DIAGNOSTICS(this, Diagnostics->Count(TEXT("FormationRevisionChangeCount"), this, FormationRevision));
 	NotifyAllReservedRequestersSlotChanged();
 	UE_LOG(
 		LogProjectBH,
@@ -867,6 +874,7 @@ void UCombatEngagementSlotComponent::UpdateCorridorFormationDirection()
 	{
 		LastNotifiedCorridorDirection = CorridorFormationRearDirection;
 		++FormationRevision;
+		BH_DIAGNOSTICS(this, Diagnostics->Count(TEXT("FormationRevisionChangeCount"), this, FormationRevision));
 		NotifyAllReservedRequestersSlotChanged();
 	}
 }
@@ -904,6 +912,7 @@ void UCombatEngagementSlotComponent::UpdatePocketFormationDirection()
 		ReformRingReservations(WaitReservations, EBHCombatSlotType::Wait);
 		ReformRingReservations(HoldingReservations, EBHCombatSlotType::Holding);
 		++FormationRevision;
+		BH_DIAGNOSTICS(this, Diagnostics->Count(TEXT("FormationRevisionChangeCount"), this, FormationRevision));
 		NotifyAllReservedRequestersSlotChanged();
 	}
 }
@@ -951,6 +960,7 @@ void UCombatEngagementSlotComponent::RefreshCorridorFormationCapacity(float Delt
 		PendingCorridorCapacityElapsed = 0.0f;
 		ReconcileCorridorAttackReservations();
 		++FormationRevision;
+		BH_DIAGNOSTICS(this, Diagnostics->Count(TEXT("FormationRevisionChangeCount"), this, FormationRevision));
 		NotifyAllReservedRequestersSlotChanged();
 		return;
 	}
@@ -985,6 +995,7 @@ void UCombatEngagementSlotComponent::RefreshCorridorFormationCapacity(float Delt
 	PendingCorridorCapacityElapsed = 0.0f;
 	ReconcileCorridorAttackReservations();
 	++FormationRevision;
+	BH_DIAGNOSTICS(this, Diagnostics->Count(TEXT("FormationRevisionChangeCount"), this, FormationRevision));
 	NotifyAllReservedRequestersSlotChanged();
 }
 
@@ -1025,6 +1036,7 @@ void UCombatEngagementSlotComponent::RefreshCorridorRowLayout(float DeltaTime)
 		PendingCorridorRowLayoutElapsed = 0.0f;
 		RepackAllCorridorQueueLayers(false);
 		++FormationRevision;
+		BH_DIAGNOSTICS(this, Diagnostics->Count(TEXT("FormationRevisionChangeCount"), this, FormationRevision));
 		NotifyAllReservedRequestersSlotChanged();
 		return;
 	}
@@ -1080,6 +1092,7 @@ void UCombatEngagementSlotComponent::RefreshCorridorRowLayout(float DeltaTime)
 	PendingCorridorRowLayoutElapsed = 0.0f;
 	RepackAllCorridorQueueLayers(false);
 	++FormationRevision;
+	BH_DIAGNOSTICS(this, Diagnostics->Count(TEXT("FormationRevisionChangeCount"), this, FormationRevision));
 	NotifyAllReservedRequestersSlotChanged();
 }
 
@@ -1587,6 +1600,7 @@ void UCombatEngagementSlotComponent::RefreshPocketFormationCapacity()
 		return;
 	}
 	++FormationRevision;
+	BH_DIAGNOSTICS(this, Diagnostics->Count(TEXT("FormationRevisionChangeCount"), this, FormationRevision));
 	NotifyAllReservedRequestersSlotChanged();
 }
 
@@ -2197,7 +2211,7 @@ void UCombatEngagementSlotComponent::UpdateCorridorSideForAttackReservation(
 bool UCombatEngagementSlotComponent::FindCorridorWaitAdmissionForAttackSlot(
 	int32 AttackSlotIndex,
 	int32& OutWaitSlotIndex,
-	bool bRequireWaitArrival) const
+	bool bRequireWaitArrival, const TSet<const AActor*>* EligibleRequesters) const
 {
 	OutWaitSlotIndex = INDEX_NONE;
 	if (!IsCorridorFormationActive()
@@ -2220,6 +2234,8 @@ bool UCombatEngagementSlotComponent::FindCorridorWaitAdmissionForAttackSlot(
 	for (int32 WaitSlotIndex = 0; WaitSlotIndex < WaitReservations.Num(); ++WaitSlotIndex)
 	{
 		AActor* Requester = WaitReservations[WaitSlotIndex].Get();
+		// Optional read-only observation filter; gameplay callers always use nullptr.
+		if (EligibleRequesters && !EligibleRequesters->Contains(Requester)) continue;
 		if (!Requester
 			|| !CorridorWaitRowLayout.IsValidIndex(WaitSlotIndex)
 			|| CorridorWaitRowLayout[WaitSlotIndex].SideIndex != TargetSideIndex
@@ -4101,6 +4117,7 @@ void UCombatEngagementSlotComponent::ReleaseSlot(AActor* Requester, bool bPreser
 	{
 		RepackAllCorridorQueueLayers(true);
 		++FormationRevision;
+		BH_DIAGNOSTICS(this, Diagnostics->Count(TEXT("FormationRevisionChangeCount"), this, FormationRevision));
 		NotifyAllReservedRequestersSlotChanged();
 	}
 }
@@ -4277,6 +4294,7 @@ void UCombatEngagementSlotComponent::PruneInvalidReservations()
 	{
 		RepackAllCorridorQueueLayers(true);
 		++FormationRevision;
+		BH_DIAGNOSTICS(this, Diagnostics->Count(TEXT("FormationRevisionChangeCount"), this, FormationRevision));
 		NotifyAllReservedRequestersSlotChanged();
 	}
 }
@@ -4477,6 +4495,7 @@ bool UCombatEngagementSlotComponent::ReconcileLargeEnemyExclusionWedges()
 		return false;
 	}
 	++FormationRevision;
+	BH_DIAGNOSTICS(this, Diagnostics->Count(TEXT("FormationRevisionChangeCount"), this, FormationRevision));
 	UE_LOG(
 		LogProjectBH,
 		Verbose,
@@ -4580,24 +4599,37 @@ bool UCombatEngagementSlotComponent::TryForceReserveLargeEnemyAttackSlot(AActor*
 			OwnerView.SlotLocation);
 	}
 
+#if !UE_BUILD_SHIPPING
+	auto* DiagnosticCollector = UBHCombatDiagnosticsSubsystem::Get(this);
+	const uint64 DiagnosticDecision = DiagnosticCollector ? DiagnosticCollector->NewDecision() : 0;
+	TMap<int32, FVector2D> DiagnosticPathTerms;
+	TArray<FBHLargeReservationEvaluation> DiagnosticEvaluations;
+#endif
 	for (int32 AttackSlotIndex = 0; AttackSlotIndex < ActiveAttackSlotCount; ++AttackSlotIndex)
 	{
-		FVector AttackSlotLocation;
-		if (!GetSlotWorldLocation(
+		FVector AttackSlotLocation = FVector::ZeroVector;
+		const bool bHasSlotLocation = GetSlotWorldLocation(
 			EBHCombatSlotType::Attack,
 			AttackSlotIndex,
-			AttackSlotLocation)
+			AttackSlotLocation);
+		if (!bHasSlotLocation
 			|| FVector::DistSquared2D(GetOwner()->GetActorLocation(), AttackSlotLocation)
 				> FMath::Square(MaximumAttackSlotDistance))
 		{
+			BH_DIAGNOSTICS(this, if (Diagnostics->IsTracing()) Diagnostics->TraceLarge(DiagnosticDecision, Requester, AttackSlotIndex, bHasSlotLocation ? AttackSlotLocation.ToString() : FString(), false, bHasSlotLocation ? TEXT("OutsideAttackRange") : TEXT("SlotProjectionFailed"), INDEX_NONE, false, TEXT(""), TEXT(""), TEXT(""), false, false));
 			continue;
 		}
 
 		float PathScore = 0.0f;
-		if (!GetNavigationPathScore(Requester, AttackSlotLocation, PathScore))
+		float DiagnosticPathLength = 0.0f, DiagnosticCongestion = 0.0f;
+		if (!GetNavigationPathScore(Requester, AttackSlotLocation, PathScore, &DiagnosticPathLength, &DiagnosticCongestion))
 		{
+			BH_DIAGNOSTICS(this, if (Diagnostics->IsTracing()) Diagnostics->TraceLarge(DiagnosticDecision, Requester, AttackSlotIndex, AttackSlotLocation.ToString(), false, TEXT("NoCompleteNavigationPath"), INDEX_NONE, false, TEXT(""), TEXT(""), TEXT(""), false, false));
 			continue;
 		}
+#if !UE_BUILD_SHIPPING
+		if (DiagnosticDecision) DiagnosticPathTerms.Add(AttackSlotIndex, FVector2D(DiagnosticPathLength, DiagnosticCongestion));
+#endif
 
 		FBHAttackSlotPolicyCandidate& Candidate = PolicyInput.Candidates.AddDefaulted_GetRef();
 		Candidate.SlotIndex = AttackSlotIndex;
@@ -4608,7 +4640,24 @@ bool UCombatEngagementSlotComponent::TryForceReserveLargeEnemyAttackSlot(AActor*
 	}
 
 	const FBHLargeEnemyAttackPolicyPlan Plan =
-		FBHLargeEnemyEngagementPolicy::BuildAttackReservationPlan(PolicyInput);
+		FBHLargeEnemyEngagementPolicy::BuildAttackReservationPlan(PolicyInput
+#if !UE_BUILD_SHIPPING
+			, DiagnosticDecision ? &DiagnosticEvaluations : nullptr
+#endif
+		);
+#if !UE_BUILD_SHIPPING
+	if (DiagnosticDecision)
+	{
+		for (const FBHLargeReservationEvaluation& E : DiagnosticEvaluations)
+		{
+			const FBHAttackSlotPolicyCandidate* Candidate = PolicyInput.Candidates.FindByPredicate([&](const FBHAttackSlotPolicyCandidate& Value) { return Value.SlotIndex == E.SlotIndex; });
+			if (!Candidate) continue;
+			const FVector2D Terms = DiagnosticPathTerms.FindRef(E.SlotIndex);
+			DiagnosticCollector->TraceLarge(DiagnosticDecision, Requester, E.SlotIndex, Candidate->SlotLocation.ToString(), E.bValid, E.RejectedReason, E.YieldCount, Candidate->bPreferredCorridorSide,
+				FString::SanitizeFloat(Terms.X), FString::SanitizeFloat(Terms.Y), FString::SanitizeFloat(Candidate->PathScore), E.SlotIndex == Plan.AttackSlotIndex);
+		}
+	}
+#endif
 	if (!Plan.IsValid())
 	{
 		return false;
@@ -4661,6 +4710,7 @@ bool UCombatEngagementSlotComponent::TryForceReserveLargeEnemyAttackSlot(AActor*
 	}
 	NotifyRequesterSlotChanged(Requester);
 	++FormationRevision;
+	BH_DIAGNOSTICS(this, Diagnostics->Count(TEXT("FormationRevisionChangeCount"), this, FormationRevision));
 	UE_LOG(
 		LogProjectBH,
 		Display,
@@ -4817,17 +4867,22 @@ bool UCombatEngagementSlotComponent::ExecuteCoreIntrusionHandover(
 	AActor* AttackOwner,
 	AActor* Intruder)
 {
+#if !UE_BUILD_SHIPPING
+	const double DiagnosticHandoverDuration = CoreIntrusionStableElapsed;
+#endif
 	if (!AttackReservations.IsValidIndex(AttackSlotIndex)
 		|| AttackReservations[AttackSlotIndex].Get() != AttackOwner
 		|| !AttackOwner
 		|| !Intruder)
 	{
+		BH_DIAGNOSTICS(this, Diagnostics->Handover(Intruder, AttackSlotIndex, FormationRevision, false, TEXT("InvalidOwnership"), DiagnosticHandoverDuration));
 		return false;
 	}
 	const ABHEnemy* CurrentAttackEnemy = Cast<ABHEnemy>(AttackOwner);
 	if (CurrentAttackEnemy
 		&& CurrentAttackEnemy->GetEnemySizeClass() == EBHEnemySizeClass::Large)
 	{
+		BH_DIAGNOSTICS(this, Diagnostics->Handover(Intruder, AttackSlotIndex, FormationRevision, false, TEXT("LargeOwnerProtected"), DiagnosticHandoverDuration));
 		return false;
 	}
 
@@ -4843,11 +4898,13 @@ bool UCombatEngagementSlotComponent::ExecuteCoreIntrusionHandover(
 		int32 PendingIndex = INDEX_NONE;
 		if (!FindPendingRequesterIndex(Intruder, PendingIndex))
 		{
+			BH_DIAGNOSTICS(this, Diagnostics->Handover(Intruder, AttackSlotIndex, FormationRevision, false, TEXT("IntruderNotQueued"), DiagnosticHandoverDuration));
 			return false;
 		}
 	}
 	if (!CanRequesterOccupyAttackSlot(Intruder, AttackSlotIndex, AttackOwner))
 	{
+		BH_DIAGNOSTICS(this, Diagnostics->Handover(Intruder, AttackSlotIndex, FormationRevision, false, TEXT("CannotOccupy"), DiagnosticHandoverDuration));
 		return false;
 	}
 
@@ -4883,6 +4940,7 @@ bool UCombatEngagementSlotComponent::ExecuteCoreIntrusionHandover(
 		AttackSlotIndex,
 		*AttackOwner->GetName(),
 		*Intruder->GetName());
+	BH_DIAGNOSTICS(this, Diagnostics->Handover(Intruder, AttackSlotIndex, FormationRevision, true, TEXT("ExecuteCoreIntrusionHandover"), DiagnosticHandoverDuration));
 	return true;
 }
 
@@ -5050,6 +5108,9 @@ bool UCombatEngagementSlotComponent::ExecuteAttackWaitHandover(
 	AActor* Candidate,
 	float Cooldown)
 {
+#if !UE_BUILD_SHIPPING
+	const double DiagnosticHandoverDuration = AttackHandoverElapsed.IsValidIndex(AttackSlotIndex) ? AttackHandoverElapsed[AttackSlotIndex] : 0.0f;
+#endif
 	if (!AttackReservations.IsValidIndex(AttackSlotIndex)
 		|| !WaitReservations.IsValidIndex(WaitSlotIndex)
 		|| AttackReservations[AttackSlotIndex].Get() != CurrentAttackOwner
@@ -5057,16 +5118,19 @@ bool UCombatEngagementSlotComponent::ExecuteAttackWaitHandover(
 		|| !CurrentAttackOwner
 		|| !Candidate)
 	{
+		BH_DIAGNOSTICS(this, Diagnostics->Handover(Candidate, AttackSlotIndex, FormationRevision, false, TEXT("InvalidOwnership"), DiagnosticHandoverDuration));
 		return false;
 	}
 	const ABHEnemy* CurrentAttackEnemy = Cast<ABHEnemy>(CurrentAttackOwner);
 	if (CurrentAttackEnemy
 		&& CurrentAttackEnemy->GetEnemySizeClass() == EBHEnemySizeClass::Large)
 	{
+		BH_DIAGNOSTICS(this, Diagnostics->Handover(Candidate, AttackSlotIndex, FormationRevision, false, TEXT("LargeOwnerProtected"), DiagnosticHandoverDuration));
 		return false;
 	}
 	if (!CanRequesterOccupyAttackSlot(Candidate, AttackSlotIndex, CurrentAttackOwner))
 	{
+		BH_DIAGNOSTICS(this, Diagnostics->Handover(Candidate, AttackSlotIndex, FormationRevision, false, TEXT("CannotOccupy"), DiagnosticHandoverDuration));
 		return false;
 	}
 
@@ -5084,6 +5148,7 @@ bool UCombatEngagementSlotComponent::ExecuteAttackWaitHandover(
 			FormerWaitSlotLocation)
 		|| !GetNavigationPathScore(Candidate, AttackSlotLocation, CandidatePathScore))
 	{
+		BH_DIAGNOSTICS(this, Diagnostics->Handover(Candidate, AttackSlotIndex, FormationRevision, false, TEXT("SlotOrPathUnavailable"), DiagnosticHandoverDuration));
 		return false;
 	}
 
@@ -5126,6 +5191,7 @@ bool UCombatEngagementSlotComponent::ExecuteAttackWaitHandover(
 			AttackSlotIndex,
 			*Candidate->GetName());
 	}
+	BH_DIAGNOSTICS(this, Diagnostics->Handover(Candidate, AttackSlotIndex, FormationRevision, true, TEXT("ExecuteAttackWaitHandover"), DiagnosticHandoverDuration));
 	return true;
 }
 
@@ -5279,6 +5345,7 @@ void UCombatEngagementSlotComponent::FinalizeInitialFormationAssignments()
 	}
 
 	++FormationRevision;
+	BH_DIAGNOSTICS(this, Diagnostics->Count(TEXT("FormationRevisionChangeCount"), this, FormationRevision));
 	NotifyAllReservedRequestersSlotChanged();
 }
 
@@ -5560,7 +5627,7 @@ bool UCombatEngagementSlotComponent::AssignBestPendingRequesterToHolding()
 bool UCombatEngagementSlotComponent::FindBestWaitAdmission(
 	int32& OutWaitSlotIndex,
 	int32& OutAttackSlotIndex,
-	bool bAllowUnarrivedWait) const
+	bool bAllowUnarrivedWait, const TSet<const AActor*>* EligibleRequesters) const
 {
 	OutWaitSlotIndex = INDEX_NONE;
 	OutAttackSlotIndex = INDEX_NONE;
@@ -5587,7 +5654,7 @@ bool UCombatEngagementSlotComponent::FindBestWaitAdmission(
 			if (!FindCorridorWaitAdmissionForAttackSlot(
 				AttackSlotIndex,
 				WaitSlotIndex,
-				!bAllowUnarrivedWait))
+				!bAllowUnarrivedWait, EligibleRequesters))
 			{
 				continue;
 			}
@@ -5630,6 +5697,8 @@ bool UCombatEngagementSlotComponent::FindBestWaitAdmission(
 		for (int32 WaitSlotIndex = 0; WaitSlotIndex < WaitReservations.Num(); ++WaitSlotIndex)
 		{
 			AActor* Requester = WaitReservations[WaitSlotIndex].Get();
+			// Optional read-only observation filter; gameplay callers always use nullptr.
+			if (EligibleRequesters && !EligibleRequesters->Contains(Requester)) continue;
 			if (!Requester || CurrentTime < GetAttackEligibleTime(Requester))
 			{
 				continue;
@@ -6034,6 +6103,7 @@ void UCombatEngagementSlotComponent::TryReformFormation()
 
 void UCombatEngagementSlotComponent::ReformReservations()
 {
+	BH_DIAGNOSTICS(this, Diagnostics->Count(TEXT("ReformCount"), this, FormationRevision));
 	if (IsCorridorFormationActive())
 	{
 		ReconcileCorridorAttackReservations();
@@ -6041,6 +6111,7 @@ void UCombatEngagementSlotComponent::ReformReservations()
 		ReformRingReservations(WaitReservations, EBHCombatSlotType::Wait);
 		ReformRingReservations(HoldingReservations, EBHCombatSlotType::Holding);
 		++FormationRevision;
+		BH_DIAGNOSTICS(this, Diagnostics->Count(TEXT("FormationRevisionChangeCount"), this, FormationRevision));
 		NotifyAllReservedRequestersSlotChanged();
 		return;
 	}
@@ -6049,6 +6120,7 @@ void UCombatEngagementSlotComponent::ReformReservations()
 	ReformRingReservations(WaitReservations, EBHCombatSlotType::Wait);
 	ReformRingReservations(HoldingReservations, EBHCombatSlotType::Holding);
 	++FormationRevision;
+	BH_DIAGNOSTICS(this, Diagnostics->Count(TEXT("FormationRevisionChangeCount"), this, FormationRevision));
 	NotifyAllReservedRequestersSlotChanged();
 
 	UE_LOG(
@@ -6131,6 +6203,7 @@ void UCombatEngagementSlotComponent::RefreshOpenFrontFillPriority()
 	if (bWaitChanged || bHoldingChanged)
 	{
 		++FormationRevision;
+		BH_DIAGNOSTICS(this, Diagnostics->Count(TEXT("FormationRevisionChangeCount"), this, FormationRevision));
 		UE_LOG(
 			LogProjectBH,
 			Display,
@@ -6519,6 +6592,7 @@ void UCombatEngagementSlotComponent::BeginExitDecompression(EBHCombatSpaceMode P
 	}
 	bExitDecompressionActive = true;
 	++FormationRevision;
+	BH_DIAGNOSTICS(this, Diagnostics->Count(TEXT("FormationRevisionChangeCount"), this, FormationRevision));
 	NotifyAllReservedRequestersSlotChanged();
 
 	UE_LOG(
@@ -6580,6 +6654,7 @@ void UCombatEngagementSlotComponent::UpdateExitDecompression()
 		if (bRemovedUnreachableRequester)
 		{
 			++FormationRevision;
+			BH_DIAGNOSTICS(this, Diagnostics->Count(TEXT("FormationRevisionChangeCount"), this, FormationRevision));
 			NotifyAllReservedRequestersSlotChanged();
 		}
 	}
@@ -6609,6 +6684,7 @@ void UCombatEngagementSlotComponent::StopExitDecompression()
 	bExitDecompressionFailSafeApplied = false;
 	ExitDecompressionRequesters.Reset();
 	++FormationRevision;
+	BH_DIAGNOSTICS(this, Diagnostics->Count(TEXT("FormationRevisionChangeCount"), this, FormationRevision));
 	NotifyAllReservedRequestersSlotChanged();
 }
 
@@ -7561,6 +7637,7 @@ bool UCombatEngagementSlotComponent::ResolveCombatCoreEscapeGoal(
 		return false;
 	}
 
+	BH_DIAGNOSTICS(this, Diagnostics->BeginCore(Requester, this));
 	const FVector RouteCenter = Owner->GetActorLocation();
 	const FVector RequesterLocation = Requester->GetActorLocation();
 	FVector InitialDirection = RequesterLocation - RouteCenter;
@@ -7645,6 +7722,7 @@ bool UCombatEngagementSlotComponent::ResolveCombatCoreEscapeGoal(
 
 	if (!bFoundCandidate)
 	{
+		BH_DIAGNOSTICS(this, Diagnostics->EndCore(Requester, false, TEXT("NoValidEscapeCandidate")));
 		return false;
 	}
 	OutRouteStage = EBHCombatMoveRouteStage::CoreEscape;
@@ -7767,6 +7845,20 @@ bool UCombatEngagementSlotComponent::ResolveCorridorCombatCoreBypassGoal(
 		FVector Location = FVector::ZeroVector;
 		EBHCombatMoveRouteStage Stage = EBHCombatMoveRouteStage::Direct;
 		float Score = TNumericLimits<float>::Max();
+		const TCHAR* RejectedReason = TEXT("ProjectionOrCoreCrossing");
+		float Approach = 0, Exit = 0, Arc = 0;
+	};
+#if !UE_BUILD_SHIPPING
+	auto* DiagnosticCollector = UBHCombatDiagnosticsSubsystem::Get(this);
+	const uint64 DiagnosticDecision = DiagnosticCollector ? DiagnosticCollector->NewDecision() : 0;
+#endif
+	const auto TraceCandidate = [&](int32 Direction, const FBypassCandidate& Candidate, bool bEvaluated, bool bValid, bool bLocked, bool bParity, bool bSelected, const TCHAR* Reason)
+	{
+		BH_DIAGNOSTICS(this, if (Diagnostics->IsTracing()) Diagnostics->TraceBypass(DiagnosticDecision, Requester, Direction, bEvaluated, bValid,
+			bEvaluated ? (bValid ? TEXT("") : Candidate.RejectedReason) : TEXT("NotEvaluatedDueToDirectionLock"),
+			bValid ? FString::SanitizeFloat(Candidate.Approach) : FString(), bValid ? FString::SanitizeFloat(Candidate.Exit) : FString(),
+			bValid ? FString::SanitizeFloat(Candidate.Arc) : FString(), bValid ? FString::SanitizeFloat(Candidate.Score) : FString(),
+			bLocked, bParity, bSelected, Reason));
 	};
 	const auto BuildCandidate = [&](int32 RotationSign, FBypassCandidate& OutCandidate)
 	{
@@ -7793,6 +7885,7 @@ bool UCombatEngagementSlotComponent::ResolveCorridorCombatCoreBypassGoal(
 			return false;
 		}
 
+		OutCandidate.RejectedReason = TEXT("ApproachOrExitPathUnavailable");
 		float ApproachScore = 0.0f;
 		float ExitScore = 0.0f;
 		if (!GetNavigationPathScoreBetween(
@@ -7811,13 +7904,16 @@ bool UCombatEngagementSlotComponent::ResolveCorridorCombatCoreBypassGoal(
 		}
 
 		const float RemainingArcAngle = FMath::Max(0.0f, RemainingAngle - StepAngle);
+		const float RemainingArcCost = BypassRadius * FMath::DegreesToRadians(RemainingArcAngle);
 		OutCandidate.Location = ProjectedWaypoint;
 		OutCandidate.Stage = RotationSign > 0
 			? EBHCombatMoveRouteStage::BypassCorePositive
 			: EBHCombatMoveRouteStage::BypassCoreNegative;
 		OutCandidate.Score = ApproachScore
 			+ ExitScore
-			+ BypassRadius * FMath::DegreesToRadians(RemainingArcAngle);
+			+ RemainingArcCost;
+		OutCandidate.Approach = ApproachScore; OutCandidate.Exit = ExitScore; OutCandidate.Arc = RemainingArcCost;
+		OutCandidate.RejectedReason = TEXT("");
 		return true;
 	};
 
@@ -7827,20 +7923,27 @@ bool UCombatEngagementSlotComponent::ResolveCorridorCombatCoreBypassGoal(
 	FBypassCandidate BestCandidate;
 	if (LockedRotationSign != 0 && BuildCandidate(LockedRotationSign, BestCandidate))
 	{
+		TraceCandidate(LockedRotationSign, BestCandidate, true, true, true, false, true, TEXT("ExistingDirectionLock"));
+		TraceCandidate(-LockedRotationSign, FBypassCandidate(), false, false, false, false, false, TEXT("ExistingDirectionLock"));
 		OutMoveGoal = BestCandidate.Location;
 		OutRouteStage = BestCandidate.Stage;
 		return true;
 	}
 
+	if (LockedRotationSign != 0) TraceCandidate(LockedRotationSign, BestCandidate, true, false, true, false, false, TEXT("ExistingDirectionLockFailed"));
 	FBypassCandidate PositiveCandidate;
 	FBypassCandidate NegativeCandidate;
 	const bool bHasPositiveCandidate = BuildCandidate(1, PositiveCandidate);
 	const bool bHasNegativeCandidate = BuildCandidate(-1, NegativeCandidate);
 	if (!bHasPositiveCandidate && !bHasNegativeCandidate)
 	{
+		TraceCandidate(1, PositiveCandidate, true, false, LockedRotationSign == 1, false, false, TEXT("NoValidCandidate"));
+		TraceCandidate(-1, NegativeCandidate, true, false, LockedRotationSign == -1, false, false, TEXT("NoValidCandidate"));
 		return false;
 	}
 
+	const TCHAR* DiagnosticSelectionReason = TEXT("OnlyValidCandidate");
+	bool bDiagnosticParity = false;
 	if (!bHasNegativeCandidate)
 	{
 		BestCandidate = PositiveCandidate;
@@ -7851,18 +7954,23 @@ bool UCombatEngagementSlotComponent::ResolveCorridorCombatCoreBypassGoal(
 	}
 	else if (PositiveCandidate.Score + 1.0f < NegativeCandidate.Score)
 	{
+		DiagnosticSelectionReason = TEXT("LowerScore");
 		BestCandidate = PositiveCandidate;
 	}
 	else if (NegativeCandidate.Score + 1.0f < PositiveCandidate.Score)
 	{
+		DiagnosticSelectionReason = TEXT("LowerScore");
 		BestCandidate = NegativeCandidate;
 	}
 	else
 	{
+		DiagnosticSelectionReason = TEXT("ParityTieBreak"); bDiagnosticParity = true;
 		const uint64 Sequence = GetQueueSequence(Requester);
 		BestCandidate = Sequence % 2 == 0 ? PositiveCandidate : NegativeCandidate;
 	}
 
+	TraceCandidate(1, PositiveCandidate, true, bHasPositiveCandidate, LockedRotationSign == 1, bDiagnosticParity, BestCandidate.Stage == EBHCombatMoveRouteStage::BypassCorePositive, DiagnosticSelectionReason);
+	TraceCandidate(-1, NegativeCandidate, true, bHasNegativeCandidate, LockedRotationSign == -1, bDiagnosticParity, BestCandidate.Stage == EBHCombatMoveRouteStage::BypassCoreNegative, DiagnosticSelectionReason);
 	OutMoveGoal = BestCandidate.Location;
 	OutRouteStage = BestCandidate.Stage;
 	return true;
@@ -7890,13 +7998,13 @@ bool UCombatEngagementSlotComponent::ProjectToNavigation(const FVector& DesiredL
 bool UCombatEngagementSlotComponent::GetNavigationPathScore(
 	AActor* Requester,
 	const FVector& Destination,
-	float& OutPathScore) const
+	float& OutPathScore, float* OutPathLength, float* OutCongestion) const
 {
 	return GetNavigationPathScoreBetween(
 		Requester,
 		Requester ? Requester->GetActorLocation() : FVector::ZeroVector,
 		Destination,
-		OutPathScore);
+		OutPathScore, false, OutPathLength, OutCongestion);
 }
 
 bool UCombatEngagementSlotComponent::GetNavigationPathScoreBetween(
@@ -7904,7 +8012,7 @@ bool UCombatEngagementSlotComponent::GetNavigationPathScoreBetween(
 	const FVector& Start,
 	const FVector& Destination,
 	float& OutPathScore,
-	bool bRejectCombatCoreCrossing) const
+	bool bRejectCombatCoreCrossing, float* OutPathLength, float* OutCongestion) const
 {
 	OutPathScore = 0.0f;
 	if (!Requester || !GetWorld())
@@ -7941,7 +8049,10 @@ bool UCombatEngagementSlotComponent::GetNavigationPathScoreBetween(
 		return false;
 	}
 
-	OutPathScore = PathLength + CalculatePathCongestionPenalty(Requester, NavigationPath->PathPoints);
+	const float Congestion = CalculatePathCongestionPenalty(Requester, NavigationPath->PathPoints);
+	OutPathScore = PathLength + Congestion;
+	if (OutPathLength) *OutPathLength = PathLength;
+	if (OutCongestion) *OutCongestion = Congestion;
 	return true;
 }
 
@@ -8015,7 +8126,7 @@ float UCombatEngagementSlotComponent::CalculatePathCongestionPenalty(
 	return static_cast<float>(NearbyAgentCount) * AdmissionCongestionPenaltyPerAgent;
 }
 
-void UCombatEngagementSlotComponent::UpdateDebugMetrics()
+void UCombatEngagementSlotComponent::UpdateDebugMetrics(bool bDrawViolations)
 {
 	CurrentSpacingViolationCount = 0;
 	CurrentAttackingEnemyCount = 0;
@@ -8085,7 +8196,7 @@ void UCombatEngagementSlotComponent::UpdateDebugMetrics()
 			if (FVector::DistSquared2D(FirstLocation, SecondLocation) < FMath::Square(MinimumSpacing))
 			{
 				++CurrentSpacingViolationCount;
-				DrawDebugLine(World, FirstLocation, SecondLocation, FColor::Magenta, false, 0.12f, 0, 3.0f);
+				if (bDrawViolations) DrawDebugLine(World, FirstLocation, SecondLocation, FColor::Magenta, false, 0.12f, 0, 3.0f);
 			}
 		}
 	}
@@ -8406,7 +8517,7 @@ void UCombatEngagementSlotComponent::DrawDebugSlots() const
 		PendingRequesterCount += Requester && !IsRequesterReserved(Requester) ? 1 : 0;
 	}
 
-	const FString DebugText = FString::Printf(
+	FString DebugText = FString::Printf(
 		TEXT("Slots A:%d/%d Cost:%d/%d Blocked:%d SideHold:%d W:%d/%d H:%d/%d Q:%d | Phase:%s Egress:%d | Reform:%d | Attacking:%d NonAttack:%d | Spacing:%d Peak:%d | VacA:%.1f Promote:%s"),
 		OccupiedAttackSlots,
 		ActiveAttackSlotCount,
@@ -8428,6 +8539,7 @@ void UCombatEngagementSlotComponent::DrawDebugSlots() const
 		PeakSpacingViolationCount,
 		MaximumAttackVacancy,
 		HasActiveCombatCoreEscape() ? TEXT("Ready/CoreLocal") : TEXT("Ready"));
+	BH_DIAGNOSTICS(this, DebugText += TEXT("\n") + Diagnostics->DebugText());
 	DrawDebugString(
 		World,
 		Owner->GetActorLocation() + FVector(0.0f, 0.0f, 170.0f),

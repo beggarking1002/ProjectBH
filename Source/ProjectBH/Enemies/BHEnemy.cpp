@@ -1,6 +1,7 @@
 // Copyright ProjectBH. All Rights Reserved.
 
 #include "BHEnemy.h"
+#include "../Diagnostics/BHCombatDiagnosticsSubsystem.h"
 
 #include "BHEnemyPoolManager.h"
 #include "../AI/BHCrowdEnemyAIController.h"
@@ -1105,6 +1106,7 @@ void ABHEnemy::SetCombatState(EBHEnemyCombatState NewState)
 
 	const EBHEnemyCombatState PreviousState = CombatState;
 	CombatState = NewState;
+	BH_DIAGNOSTICS(this, Diagnostics->AttackState(this, NewState == EBHEnemyCombatState::Attacking));
 	UE_LOG(
 		LogProjectBH,
 		Display,

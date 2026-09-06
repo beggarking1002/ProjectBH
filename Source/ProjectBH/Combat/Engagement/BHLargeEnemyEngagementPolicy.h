@@ -49,6 +49,15 @@ struct FBHLargeEnemyAttackPolicyInput
 	TArray<FBHAttackSlotPolicyCandidate> Candidates;
 };
 
+/** Optional observation of values already computed by the policy. */
+struct FBHLargeReservationEvaluation
+{
+	int32 SlotIndex = INDEX_NONE;
+	bool bValid = false;
+	const TCHAR* RejectedReason = TEXT("");
+	int32 YieldCount = INDEX_NONE;
+};
+
 /** Complete change plan applied as one reservation update by UCombatEngagementSlotComponent. */
 struct FBHLargeEnemyAttackPolicyPlan
 {
@@ -84,5 +93,6 @@ public:
 
 	/** Selects one Attack slot and the minimum Normal set that must yield. */
 	static FBHLargeEnemyAttackPolicyPlan BuildAttackReservationPlan(
-		const FBHLargeEnemyAttackPolicyInput& Input);
+		const FBHLargeEnemyAttackPolicyInput& Input,
+		TArray<FBHLargeReservationEvaluation>* Observations = nullptr);
 };

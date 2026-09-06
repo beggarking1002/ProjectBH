@@ -12,6 +12,7 @@ class UDataAsset_InputConfig;
 class UGameplayEffect;
 class UAnimMontage;
 class UCombatEngagementSlotComponent;
+class UBHCameraOcclusionComponent;
 struct FInputActionValue;
 
 /** Player-controlled character foundation for the first combat slice. */
@@ -48,6 +49,9 @@ protected:
 	/** Player view camera attached to the end of CameraBoom. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Camera", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<UCameraComponent> FollowCamera;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Camera")
+	TObjectPtr<UBHCameraOcclusionComponent> CameraOcclusion;
 
 	/** Owns the server-authoritative Attack and Wait positions around this hero. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat|Engagement Slots", meta = (AllowPrivateAccess = "true"))

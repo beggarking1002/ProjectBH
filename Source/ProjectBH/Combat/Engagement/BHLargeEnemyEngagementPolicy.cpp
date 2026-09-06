@@ -78,7 +78,8 @@ bool FBHLargeEnemyEngagementPolicy::IsLocationInsideAnyWedge(
 }
 
 FBHLargeEnemyAttackPolicyPlan FBHLargeEnemyEngagementPolicy::BuildAttackReservationPlan(
-	const FBHLargeEnemyAttackPolicyInput& Input)
+	const FBHLargeEnemyAttackPolicyInput& Input,
+	TArray<FBHLargeReservationEvaluation>* Observations)
 {
 	FBHLargeEnemyAttackPolicyPlan BestPlan;
 	int32 BestVictimCount = TNumericLimits<int32>::Max();
@@ -87,8 +88,15 @@ FBHLargeEnemyAttackPolicyPlan FBHLargeEnemyEngagementPolicy::BuildAttackReservat
 
 	for (const FBHAttackSlotPolicyCandidate& Candidate : Input.Candidates)
 	{
+		const auto Observe = [&](bool bValid, const TCHAR* Reason, int32 YieldCount)
+		{
+#if !UE_BUILD_SHIPPING
+			if (Observations) { FBHLargeReservationEvaluation& E = Observations->AddDefaulted_GetRef(); E.SlotIndex = Candidate.SlotIndex; E.bValid = bValid; E.RejectedReason = Reason; E.YieldCount = YieldCount; }
+#endif
+		};
 		if (Candidate.SlotIndex == INDEX_NONE || !FMath::IsFinite(Candidate.PathScore))
 		{
+			Observe(false, TEXT("InvalidSlotOrNonFiniteScore"), INDEX_NONE);
 			continue;
 		}
 
@@ -134,6 +142,7 @@ FBHLargeEnemyAttackPolicyPlan FBHLargeEnemyEngagementPolicy::BuildAttackReservat
 		}
 		if (bBlockedByLarge)
 		{
+			Observe(false, TEXT("BlockedByLarge"), INDEX_NONE);
 			continue;
 		}
 
@@ -168,9 +177,11 @@ FBHLargeEnemyAttackPolicyPlan FBHLargeEnemyEngagementPolicy::BuildAttackReservat
 			&& Input.bAllowRequesterOverCapacityWhenAlone;
 		if (bExceedsCapacity && !bMayUseOversizedReservation)
 		{
+			Observe(false, TEXT("CapacityExceeded"), CandidateVictims.Num());
 			continue;
 		}
 
+		Observe(true, TEXT(""), CandidateVictims.Num());
 		const bool bFewerVictims = CandidateVictims.Num() < BestVictimCount;
 		const bool bSameVictimsPreferredSide = CandidateVictims.Num() == BestVictimCount
 			&& Candidate.bPreferredCorridorSide && !bBestUsesPreferredSide;

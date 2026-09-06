@@ -51,6 +51,10 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Enemy Pool|Setup")
 	TSubclassOf<ABHEnemy> EnemyClass;
 
+	/** Include Trolls at BeginPlay. Changes apply on the next play session. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Enemy Pool|Setup")
+	bool bEnableTrollSpawning = true;
+
 	/** Optional BP_BHTroll-derived class inserted into the same pool population. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Enemy Pool|Setup")
 	TSubclassOf<ABHEnemy> TrollEnemyClass;
@@ -149,6 +153,8 @@ private:
 	TArray<FCorpseRecord> Corpses;
 	TArray<FRespawnRequest> PendingRespawns;
 
+	/** Preserve the prewarmed composition throughout this play session. */
+	bool bTrollSpawningEnabledForSession = false;
 	uint64 NextCorpseSequence = 1;
 	uint64 NextRespawnSequence = 1;
 	int32 NextSpawnPointIndex = 0;

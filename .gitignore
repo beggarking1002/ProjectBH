@@ -19,7 +19,7 @@ Plugins/
 *.vcxproj.user
 *.xcodeproj
 *.xcworkspace
-
+.codex/
 # Visual Studio / Rider / IntelliJ local files
 .vs/
 .idea/
@@ -44,6 +44,8 @@ Desktop.ini
 
 # Temporary working directories
 .tmp/
+tmp/
+.codex-temp/
 
 # Obsidian personal workspace state (keep Markdown documentation tracked)
 ProjectBH/.obsidian/cache/
@@ -74,3 +76,6 @@ ProjectBH/.trash/
 
 # Imported Medieval Castle environment pack; restore from the original asset source
 /Content/MedCastle/
+
+# Local portfolio materials
+/ProjectBH/포트폴리오/

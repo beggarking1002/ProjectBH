@@ -53,9 +53,13 @@ UCLASS(ClassGroup = (Combat), meta = (BlueprintSpawnableComponent))
 class PROJECTBH_API UCombatEngagementSlotComponent : public UActorComponent
 {
 	GENERATED_BODY()
+	friend class UBHCombatDiagnosticsSubsystem;
 
 public:
 	UCombatEngagementSlotComponent();
+#if !UE_BUILD_SHIPPING
+	float GetDiagnosticCoreExitRadius() const { return FMath::Max(GetEffectiveCombatCoreRadius() + 1.0f, CombatCoreEscapeExitRadius); }
+#endif
 
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
@@ -884,7 +888,8 @@ private:
 	bool FindCorridorWaitAdmissionForAttackSlot(
 		int32 AttackSlotIndex,
 		int32& OutWaitSlotIndex,
-		bool bRequireWaitArrival = true) const;
+		bool bRequireWaitArrival = true,
+		const TSet<const AActor*>* EligibleRequesters = nullptr) const;
 	FVector ResolveCorridorRearDirection(const FVector& UnsignedAxis) const;
 	bool IsCorridorFormationActive() const;
 	bool IsPocketFormationActive() const;
@@ -963,7 +968,8 @@ private:
 	bool FindBestWaitAdmission(
 		int32& OutWaitSlotIndex,
 		int32& OutAttackSlotIndex,
-		bool bAllowUnarrivedWait = false) const;
+		bool bAllowUnarrivedWait = false,
+		const TSet<const AActor*>* EligibleRequesters = nullptr) const;
 	bool FindBestWaitAdmissionForAttackSlot(
 		int32 AttackSlotIndex,
 		int32& OutWaitSlotIndex,
@@ -1028,15 +1034,15 @@ private:
 		EBHCombatMoveRouteStage& OutRouteStage) const;
 	float CalculatePocketCornerSlotPenalty(const FVector& SlotLocation) const;
 	bool ProjectToNavigation(const FVector& DesiredLocation, FVector& OutProjectedLocation) const;
-	bool GetNavigationPathScore(AActor* Requester, const FVector& Destination, float& OutPathScore) const;
+	bool GetNavigationPathScore(AActor* Requester, const FVector& Destination, float& OutPathScore, float* OutPathLength = nullptr, float* OutCongestion = nullptr) const;
 	bool GetNavigationPathScoreBetween(
 		AActor* Requester,
 		const FVector& Start,
 		const FVector& Destination,
 		float& OutPathScore,
-		bool bRejectCombatCoreCrossing = false) const;
+		bool bRejectCombatCoreCrossing = false, float* OutPathLength = nullptr, float* OutCongestion = nullptr) const;
 	float CalculatePathCongestionPenalty(AActor* Requester, const TArray<FVector>& PathPoints) const;
-	void UpdateDebugMetrics();
+	void UpdateDebugMetrics(bool bDrawViolations = true);
 	void DrawDebugSlots() const;
 	void DrawCombatSpaceAnalysisDebug() const;
 

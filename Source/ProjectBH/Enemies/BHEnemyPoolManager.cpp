@@ -176,6 +176,7 @@ void ABHEnemyPoolManager::InitializePool()
 		TrollEnemyClass = nullptr;
 	}
 
+	bTrollSpawningEnabledForSession = bEnableTrollSpawning && TrollEnemyClass != nullptr;
 	PoolCapacity = FMath::Max(1, PoolCapacity);
 	ActiveEnemyLimit = FMath::Clamp(ActiveEnemyLimit, 1, PoolCapacity);
 	NormalEnemiesPerTroll = FMath::Max(1, NormalEnemiesPerTroll);
@@ -476,7 +477,7 @@ int32 ABHEnemyPoolManager::GetPendingRespawnCount(EPooledEnemyKind Kind) const
 
 int32 ABHEnemyPoolManager::GetDesiredTrollCount(int32 TotalCount) const
 {
-	if (!TrollEnemyClass || TotalCount <= 0)
+	if (!bTrollSpawningEnabledForSession || !TrollEnemyClass || TotalCount <= 0)
 	{
 		return 0;
 	}

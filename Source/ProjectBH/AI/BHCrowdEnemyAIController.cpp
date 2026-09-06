@@ -1,6 +1,7 @@
 // Copyright ProjectBH. All Rights Reserved.
 
 #include "BHCrowdEnemyAIController.h"
+#include "../Diagnostics/BHCombatDiagnosticsSubsystem.h"
 
 #include "Navigation/BHNavigationQuery.h"
 #include "../BHHeroCharacter.h"
@@ -623,6 +624,13 @@ void ABHCrowdEnemyAIController::RefreshTargetAndMove()
 		StopMovement();
 		DrawDebugStatus(ControlledEnemy);
 		return;
+	}
+	if (ResolvedRouteStage != EBHCombatMoveRouteStage::CoreEscape)
+	{
+		BH_DIAGNOSTICS(this,
+			const bool bCleared = FVector::Dist2D(GetPawn()->GetActorLocation(), CurrentSlotComponent->GetOwner()->GetActorLocation())
+				>= FMath::Max(CurrentSlotComponent->GetDiagnosticCoreExitRadius(), 0.0f);
+			Diagnostics->EndCore(GetPawn(), bCleared, bCleared ? TEXT("ExitRadiusReached") : TEXT("RouteSuperseded")));
 	}
 	CurrentMoveRouteStage = ResolvedRouteStage;
 	bEscapingCombatCore = CurrentMoveRouteStage == EBHCombatMoveRouteStage::CoreEscape;
@@ -1599,6 +1607,11 @@ void ABHCrowdEnemyAIController::ReleaseCurrentCombatSlot(
 	}
 
 	const bool bHadReservation = CurrentSlotType != EBHCombatSlotType::None && CurrentSlotIndex != INDEX_NONE;
+	BH_DIAGNOSTICS(this,
+		if (bHadReservation) Diagnostics->Release(GetPawn(), CurrentSlotComponent, CurrentSlotIndex,
+			CurrentSlotComponent ? CurrentSlotComponent->GetFormationRevision() : INDEX_NONE,
+			StaticEnum<EBHCombatSlotReleaseReason>()->GetNameStringByValue(static_cast<int64>(Reason)));
+		else Diagnostics->EndCore(GetPawn(), false, TEXT("ReservationReleased")));
 	if (bTemporarilyExcludeReleasedSlot && bHadReservation && GetWorld())
 	{
 		ExcludedSlotType = CurrentSlotType;
@@ -1668,6 +1681,7 @@ void ABHCrowdEnemyAIController::RecoverStalledCombatSlot(ABHEnemy* ControlledEne
 			ControlledEnemy,
 			FailedSlotCooldown))
 	{
+		BH_DIAGNOSTICS(this, Diagnostics->Release(GetPawn(), CurrentSlotComponent, CurrentSlotIndex, CurrentSlotComponent->GetFormationRevision(), TEXT("Stalled")));
 		LastReleaseReason = EBHCombatSlotReleaseReason::Stalled;
 		bHasRequestedSlotMove = false;
 		CurrentMoveRouteStage = EBHCombatMoveRouteStage::Direct;
