@@ -365,13 +365,14 @@ void ABHCrowdEnemyAIController::RefreshTargetAndMove()
 		return;
 	}
 
+	const bool bTryChargeBeforeRecovery = ControlledEnemy->GetEnemySizeClass() == EBHEnemySizeClass::Large;
 	if (bHoldingYieldActive)
 	{
 		if (ControlledEnemy->IsAttackLocked())
 		{
 			FinishTemporaryHoldingYield(true);
 		}
-		else if (UpdateTemporaryHoldingYield(ControlledEnemy))
+		else if (!bTryChargeBeforeRecovery && UpdateTemporaryHoldingYield(ControlledEnemy))
 		{
 			DrawDebugStatus(ControlledEnemy);
 			return;
@@ -384,7 +385,7 @@ void ABHCrowdEnemyAIController::RefreshTargetAndMove()
 		{
 			FinishOverlapRecovery(true);
 		}
-		else if (UpdateOverlapRecovery(ControlledEnemy))
+		else if (!bTryChargeBeforeRecovery && UpdateOverlapRecovery(ControlledEnemy))
 		{
 			DrawDebugStatus(ControlledEnemy);
 			return;
@@ -440,7 +441,7 @@ void ABHCrowdEnemyAIController::RefreshTargetAndMove()
 		return;
 	}
 
-	if (TryStartOverlapRecovery(ControlledEnemy))
+	if (!bTryChargeBeforeRecovery && TryStartOverlapRecovery(ControlledEnemy))
 	{
 		DrawDebugStatus(ControlledEnemy);
 		return;
@@ -476,13 +477,23 @@ void ABHCrowdEnemyAIController::RefreshTargetAndMove()
 		ControlledEnemy->GetActorLocation(),
 		CurrentTarget->GetActorLocation());
 	LastDistanceToSlot = DistanceToTarget;
-	if (CurrentSlotType == EBHCombatSlotType::Attack
-		&& (!CurrentSlotComponent
-			|| !CurrentSlotComponent->IsRequesterInExitDecompression(ControlledEnemy))
-		&& ControlledEnemy->TryStartChargeAttack(CurrentTarget))
+	// A validated charge is a range-based action, not an Attack-slot reward.
+	// Try it before crowd recovery/decompression can indefinitely delay the Troll.
+	if (ControlledEnemy->TryStartChargeAttack(CurrentTarget))
 	{
+		FinishTemporaryHoldingYield(false);
+		FinishOverlapRecovery(false);
 		ResetPursuitTracking();
 		ResetStuckTracking();
+		DrawDebugStatus(ControlledEnemy);
+		return;
+	}
+
+	if (bTryChargeBeforeRecovery
+		&& ((bHoldingYieldActive && UpdateTemporaryHoldingYield(ControlledEnemy))
+		|| (bOverlapRecoveryActive && UpdateOverlapRecovery(ControlledEnemy))
+		|| TryStartOverlapRecovery(ControlledEnemy)))
+	{
 		DrawDebugStatus(ControlledEnemy);
 		return;
 	}

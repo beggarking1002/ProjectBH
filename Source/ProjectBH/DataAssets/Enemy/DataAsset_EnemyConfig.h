@@ -80,6 +80,13 @@ struct PROJECTBH_API FBHEnemyChargeConfig
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, meta = (ClampMin = "0.0", Units = "cm"))
 	float MaximumStartDistance = 850.0f;
 
+	/** Maximum movement lead; zero aims at the current position. No mid-charge homing. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, meta = (ClampMin = "0.0", Units = "s"))
+	float MaximumPredictionTime = 0.75f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, meta = (ClampMin = "0.0", Units = "cm"))
+	float MaximumPredictionDistance = 300.0f;
+
 	/** Lets the attack start when its authored travel ends this far short of the target center. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, meta = (ClampMin = "0.0", Units = "cm"))
 	float TargetReachTolerance = 120.0f;

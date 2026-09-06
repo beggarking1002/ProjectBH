@@ -1,6 +1,7 @@
 // Copyright ProjectBH. All Rights Reserved.
 
 #include "BHEnemyChargeComponent.h"
+#include "BHChargePrediction.h"
 
 #include "../../AI/BHCrowdEnemyAIController.h"
 #include "../../BHCollisionChannels.h"
@@ -11,6 +12,7 @@
 #include "Components/CapsuleComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "EngineUtils.h"
+#include "Engine/OverlapResult.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "NavigationSystem.h"
 
@@ -60,11 +62,9 @@ void UBHEnemyChargeComponent::TickComponent(
 	}
 
 	const FVector CurrentLocation = OwningEnemy->GetActorLocation();
-	if (!CurrentLocation.Equals(PreviousChargeLocation, UE_KINDA_SMALL_NUMBER))
-	{
-		SweepAsideEnemies(PreviousChargeLocation, CurrentLocation, *Config);
-		PreviousChargeLocation = CurrentLocation;
-	}
+	// Include stationary wind-up frames: an enemy may enter an unmoving capsule.
+	SweepAsideEnemies(PreviousChargeLocation, CurrentLocation, *Config);
+	PreviousChargeLocation = CurrentLocation;
 }
 
 bool UBHEnemyChargeComponent::TryStartCharge(AActor* TargetActor)
@@ -72,6 +72,7 @@ bool UBHEnemyChargeComponent::TryStartCharge(AActor* TargetActor)
 	const FBHEnemyChargeConfig* Config = GetChargeConfig();
 	UWorld* World = GetWorld();
 	if (!Config
+		|| bChargeActive
 		|| !Config->bEnabled
 		|| !World
 		|| !OwningEnemy
@@ -80,12 +81,22 @@ bool UBHEnemyChargeComponent::TryStartCharge(AActor* TargetActor)
 		|| OwningEnemy->GetCombatState() != EBHEnemyCombatState::Chasing
 		|| !OwningEnemy->IsPoolActive()
 		|| !IsValid(TargetActor)
+		|| !OwningEnemy->GetCharacterMovement()
+		|| !OwningEnemy->GetCharacterMovement()->IsMovingOnGround()
+		|| OwningEnemy->IsHighGroundDropActive()
 		|| World->GetTimeSeconds() < NextChargeAllowedTime)
 	{
 		return false;
 	}
 
 	const FBHEnemyAttackConfig* AttackConfig = OwningEnemy->GetAttackConfig(Config->AttackId);
+	// Cheap range gate before extracting montage motion or querying the world.
+	const float CurrentDistance = FVector::Dist2D(OwningEnemy->GetActorLocation(), TargetActor->GetActorLocation());
+	if (CurrentDistance < FMath::Max(0.0f, Config->MinimumStartDistance)
+		|| CurrentDistance > FMath::Max(Config->MinimumStartDistance, Config->MaximumStartDistance))
+	{
+		return false;
+	}
 	if (!AttackConfig || !AttackConfig->Montage || !AttackConfig->MontageSections.IsEmpty())
 	{
 		if (AttackConfig && !AttackConfig->MontageSections.IsEmpty() && !bLoggedInvalidRootMotion)
@@ -137,17 +148,11 @@ bool UBHEnemyChargeComponent::TryStartCharge(AActor* TargetActor)
 		TargetActor,
 		*Config,
 		AuthoredTravelDistance,
+		AttackConfig->Montage->GetPlayLength() / FMath::Max(0.01f, AttackConfig->Montage->RateScale),
 		ResolvedDirection,
 		ResolvedEndLocation))
 	{
 		return false;
-	}
-
-	if (ABHCrowdEnemyAIController* CrowdController =
-		Cast<ABHCrowdEnemyAIController>(OwningEnemy->GetController()))
-	{
-		CrowdController->StopMovement();
-		CrowdController->ClearFocus(EAIFocusPriority::Gameplay);
 	}
 
 	ChargeDirection = ResolvedDirection;
@@ -155,6 +160,13 @@ bool UBHEnemyChargeComponent::TryStartCharge(AActor* TargetActor)
 	ChargeMontage = AttackConfig->Montage;
 	KnockedAsideEnemies.Reset();
 	bChargeActive = true;
+	// Mark active before aborting the old move; its callback may refresh AI.
+	if (ABHCrowdEnemyAIController* CrowdController =
+		Cast<ABHCrowdEnemyAIController>(OwningEnemy->GetController()))
+	{
+		CrowdController->StopMovement();
+		CrowdController->ClearFocus(EAIFocusPriority::Gameplay);
+	}
 
 	if (UCapsuleComponent* Capsule = OwningEnemy->GetCapsuleComponent())
 	{
@@ -194,6 +206,7 @@ bool UBHEnemyChargeComponent::TryStartCharge(AActor* TargetActor)
 		OwningEnemy->GetController()->SetControlRotation(ChargeRotation);
 	}
 
+	SweepAsideEnemies(PreviousChargeLocation, PreviousChargeLocation, *Config);
 	return true;
 }
 
@@ -231,6 +244,7 @@ bool UBHEnemyChargeComponent::ResolveClearChargeLane(
 	AActor* TargetActor,
 	const FBHEnemyChargeConfig& Config,
 	float AuthoredTravelDistance,
+	float AuthoredDuration,
 	FVector& OutDirection,
 	FVector& OutEndLocation) const
 {
@@ -265,6 +279,10 @@ bool UBHEnemyChargeComponent::ResolveClearChargeLane(
 		return false;
 	}
 
+	ToTarget += BHChargePrediction::PredictOffset(
+		ToTarget, TargetActor->GetVelocity(), TravelDistance / FMath::Max(0.01f, AuthoredDuration),
+		Config.MaximumPredictionTime, Config.MaximumPredictionDistance,
+		TravelDistance + FMath::Max(0.0f, Config.TargetReachTolerance));
 	OutDirection = ToTarget.GetSafeNormal2D();
 	if (OutDirection.IsNearlyZero())
 	{
@@ -433,14 +451,25 @@ void UBHEnemyChargeComponent::SweepAsideEnemies(
 	TArray<FHitResult> Hits;
 	const float SweepRadius = Capsule->GetScaledCapsuleRadius()
 		+ FMath::Max(0.0f, Config.KnockAsideRadiusPadding);
+	const FCollisionShape ContactShape = FCollisionShape::MakeCapsule(
+		SweepRadius, FMath::Max(SweepRadius, Capsule->GetScaledCapsuleHalfHeight()));
 	World->SweepMultiByObjectType(
 		Hits,
 		SweepStart,
 		SweepEnd,
 		FQuat::Identity,
 		EnemyObjectType,
-		FCollisionShape::MakeSphere(SweepRadius),
+		ContactShape,
 		QueryParams);
+
+	// Explicit overlaps cover initial penetration and zero-length movement.
+	TArray<FOverlapResult> Overlaps;
+	World->OverlapMultiByObjectType(Overlaps, SweepEnd, FQuat::Identity,
+		EnemyObjectType, ContactShape, QueryParams);
+	for (const FOverlapResult& Overlap : Overlaps)
+	{
+		Hits.Emplace(Overlap.GetActor(), Overlap.GetComponent(), SweepEnd, FVector::ZeroVector);
+	}
 
 	const FVector ChargeRight(-ChargeDirection.Y, ChargeDirection.X, 0.0f);
 	for (const FHitResult& Hit : Hits)

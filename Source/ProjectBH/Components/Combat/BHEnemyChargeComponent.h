@@ -52,6 +52,7 @@ private:
 		AActor* TargetActor,
 		const FBHEnemyChargeConfig& Config,
 		float AuthoredTravelDistance,
+		float AuthoredDuration,
 		FVector& OutDirection,
 		FVector& OutEndLocation) const;
 	bool GetAuthoredTravelDistance(
